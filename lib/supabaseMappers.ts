@@ -1,0 +1,393 @@
+import type {
+  User,
+  Site,
+  Vehicle,
+  Expense,
+  Trip,
+  MachineSession,
+  Survey,
+  Issue,
+  SiteAssignment,
+  DriverVehicleAssignment,
+  Task,
+  Operation,
+  Report,
+} from '@/types';
+
+/** DB row (snake_case) → App (camelCase) */
+
+export function profileFromRow(row: Record<string, unknown>): User {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    role: row.role as User['role'],
+    siteAccess: (row.site_access as string[]) ?? [],
+    phone: row.phone != null ? String(row.phone) : undefined,
+    profileImage: row.profile_image != null ? String(row.profile_image) : undefined,
+    active: Boolean(row.active),
+  };
+}
+
+export function siteFromRow(row: Record<string, unknown>): Site {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    location: String(row.location),
+    status: row.status as Site['status'],
+    startDate: row.start_date != null ? String(row.start_date) : '',
+    budget: Number(row.budget ?? 0),
+    spent: Number(row.spent ?? 0),
+    progress: Number(row.progress ?? 0),
+    manager: row.manager != null ? String(row.manager) : undefined,
+    assistantSupervisorId: row.assistant_supervisor_id != null ? String(row.assistant_supervisor_id) : undefined,
+    surveyorId: row.surveyor_id != null ? String(row.surveyor_id) : undefined,
+    driverIds: (row.driver_ids as string[]) ?? [],
+    vehicleIds: (row.vehicle_ids as string[]) ?? [],
+    contractRateRwf: row.contract_rate_rwf != null ? Number(row.contract_rate_rwf) : undefined,
+  };
+}
+
+export function vehicleFromRow(row: Record<string, unknown>): Vehicle {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    type: row.type as Vehicle['type'],
+    vehicleNumberOrId: String(row.vehicle_number_or_id),
+    mileageKmPerLitre: row.mileage_km_per_litre != null ? Number(row.mileage_km_per_litre) : undefined,
+    hoursPerLitre: row.hours_per_litre != null ? Number(row.hours_per_litre) : undefined,
+    tankCapacityLitre: Number(row.tank_capacity_litre ?? 0),
+    fuelBalanceLitre: Number(row.fuel_balance_litre ?? 0),
+    idealConsumptionRange: row.ideal_consumption_range != null ? String(row.ideal_consumption_range) : undefined,
+    healthInputs: row.health_inputs != null ? String(row.health_inputs) : undefined,
+    idealWorkingRange: row.ideal_working_range != null ? String(row.ideal_working_range) : undefined,
+  };
+}
+
+export function expenseFromRow(row: Record<string, unknown>): Expense {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    amountRwf: Number(row.amount_rwf ?? 0),
+    description: String(row.description),
+    date: row.date != null ? String(row.date) : '',
+    type: row.type as Expense['type'],
+    vehicleId: row.vehicle_id != null ? String(row.vehicle_id) : undefined,
+    litres: row.litres != null ? Number(row.litres) : undefined,
+    costPerLitre: row.cost_per_litre != null ? Number(row.cost_per_litre) : undefined,
+    fuelCost: row.fuel_cost != null ? Number(row.fuel_cost) : undefined,
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+  };
+}
+
+export function tripFromRow(row: Record<string, unknown>): Trip {
+  return {
+    id: String(row.id),
+    vehicleId: String(row.vehicle_id),
+    driverId: String(row.driver_id),
+    siteId: String(row.site_id),
+    startTime: String(row.start_time),
+    endTime: row.end_time != null ? String(row.end_time) : undefined,
+    startLat: row.start_lat != null ? Number(row.start_lat) : undefined,
+    startLon: row.start_lon != null ? Number(row.start_lon) : undefined,
+    endLat: row.end_lat != null ? Number(row.end_lat) : undefined,
+    endLon: row.end_lon != null ? Number(row.end_lon) : undefined,
+    currentLat: row.current_lat != null ? Number(row.current_lat) : undefined,
+    currentLon: row.current_lon != null ? Number(row.current_lon) : undefined,
+    locationUpdatedAt: row.location_updated_at != null ? String(row.location_updated_at) : undefined,
+    distanceKm: Number(row.distance_km ?? 0),
+    loadQuantity: row.load_quantity != null ? String(row.load_quantity) : undefined,
+    status: row.status as Trip['status'],
+    fuelFilledAtStart: row.fuel_filled_at_start != null ? Number(row.fuel_filled_at_start) : undefined,
+    fuelConsumed: row.fuel_consumed != null ? Number(row.fuel_consumed) : undefined,
+    photoUri: row.photo_uri != null ? String(row.photo_uri) : undefined,
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+  };
+}
+
+export function machineSessionFromRow(row: Record<string, unknown>): MachineSession {
+  return {
+    id: String(row.id),
+    vehicleId: String(row.vehicle_id),
+    driverId: String(row.driver_id),
+    siteId: String(row.site_id),
+    startTime: String(row.start_time),
+    endTime: row.end_time != null ? String(row.end_time) : undefined,
+    durationHours: row.duration_hours != null ? Number(row.duration_hours) : undefined,
+    fuelConsumed: row.fuel_consumed != null ? Number(row.fuel_consumed) : undefined,
+    status: row.status as MachineSession['status'],
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+  };
+}
+
+export function surveyFromRow(row: Record<string, unknown>): Survey {
+  return {
+    id: String(row.id),
+    type: String(row.type),
+    siteId: String(row.site_id),
+    siteName: row.site_name != null ? String(row.site_name) : '',
+    surveyorId: String(row.surveyor_id),
+    measurements: (row.measurements as Record<string, unknown>) ?? {},
+    location: row.location as Survey['location'],
+    photos: (row.photos as string[]) ?? [],
+    status: row.status as Survey['status'],
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+    beforeFileContent: row.before_file_content != null ? String(row.before_file_content) : undefined,
+    afterFileContent: row.after_file_content != null ? String(row.after_file_content) : undefined,
+    workVolume: row.work_volume != null ? Number(row.work_volume) : undefined,
+    approvedById: row.approved_by_id != null ? String(row.approved_by_id) : undefined,
+    approvedAt: row.approved_at != null ? String(row.approved_at) : undefined,
+  };
+}
+
+export function issueFromRow(row: Record<string, unknown>): Issue {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    siteName: row.site_name != null ? String(row.site_name) : undefined,
+    raisedById: String(row.raised_by_id),
+    description: String(row.description),
+    imageUris: (row.image_uris as string[]) ?? [],
+    status: row.status as Issue['status'],
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+  };
+}
+
+export function siteAssignmentFromRow(row: Record<string, unknown>): SiteAssignment {
+  return {
+    siteId: String(row.site_id),
+    userId: String(row.user_id),
+    role: String(row.role),
+    vehicleIds: (row.vehicle_ids as string[]) ?? [],
+  };
+}
+
+export function driverVehicleAssignmentFromRow(row: Record<string, unknown>): DriverVehicleAssignment {
+  return {
+    siteId: String(row.site_id),
+    driverId: String(row.driver_id),
+    vehicleIds: (row.vehicle_ids as string[]) ?? [],
+  };
+}
+
+export function taskFromRow(row: Record<string, unknown>): Task {
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    description: String(row.description),
+    siteId: String(row.site_id),
+    siteName: row.site_name != null ? String(row.site_name) : '',
+    assignedTo: (row.assigned_to as string[]) ?? [],
+    status: row.status as Task['status'],
+    priority: row.priority as Task['priority'],
+    dueDate: row.due_date != null ? String(row.due_date) : '',
+    progress: Number(row.progress ?? 0),
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+    updatedAt: row.updated_at != null ? String(row.updated_at) : '',
+    photos: (row.photos as string[]) ?? [],
+  };
+}
+
+export function operationFromRow(row: Record<string, unknown>): Operation {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    siteId: String(row.site_id),
+    siteName: row.site_name != null ? String(row.site_name) : '',
+    type: String(row.type),
+    status: row.status as Operation['status'],
+    budget: Number(row.budget ?? 0),
+    spent: Number(row.spent ?? 0),
+    startDate: row.start_date != null ? String(row.start_date) : '',
+    endDate: row.end_date != null ? String(row.end_date) : undefined,
+    crew: (row.crew as string[]) ?? [],
+  };
+}
+
+export function reportFromRow(row: Record<string, unknown>): Report {
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    type: row.type as Report['type'],
+    generatedDate: row.generated_date != null ? String(row.generated_date) : '',
+    period: String(row.period),
+    data: row.data ?? {},
+  };
+}
+
+/** App (camelCase) → DB row (snake_case) for insert/update */
+
+export function profileToRow(u: Partial<User>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (u.name != null) row.name = u.name;
+  if (u.email != null) row.email = u.email;
+  if (u.role != null) row.role = u.role;
+  if (u.siteAccess != null) row.site_access = u.siteAccess;
+  if (u.phone !== undefined) row.phone = u.phone;
+  if (u.profileImage !== undefined) row.profile_image = u.profileImage;
+  if (u.active !== undefined) row.active = u.active;
+  return row;
+}
+
+export function siteToRow(s: Partial<Site>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (s.id != null) row.id = s.id;
+  if (s.name != null) row.name = s.name;
+  if (s.location != null) row.location = s.location;
+  if (s.status != null) row.status = s.status;
+  if (s.startDate != null) row.start_date = s.startDate;
+  if (s.budget != null) row.budget = s.budget;
+  if (s.spent != null) row.spent = s.spent;
+  if (s.progress != null) row.progress = s.progress;
+  if (s.manager !== undefined) row.manager = s.manager;
+  if (s.assistantSupervisorId !== undefined) row.assistant_supervisor_id = s.assistantSupervisorId;
+  if (s.surveyorId !== undefined) row.surveyor_id = s.surveyorId;
+  if (s.driverIds != null) row.driver_ids = s.driverIds;
+  if (s.vehicleIds != null) row.vehicle_ids = s.vehicleIds;
+  if (s.contractRateRwf !== undefined) row.contract_rate_rwf = s.contractRateRwf;
+  return row;
+}
+
+export function vehicleToRow(v: Partial<Vehicle>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (v.id != null) row.id = v.id;
+  if (v.siteId != null) row.site_id = v.siteId;
+  if (v.type != null) row.type = v.type;
+  if (v.vehicleNumberOrId != null) row.vehicle_number_or_id = v.vehicleNumberOrId;
+  if (v.mileageKmPerLitre !== undefined) row.mileage_km_per_litre = v.mileageKmPerLitre;
+  if (v.hoursPerLitre !== undefined) row.hours_per_litre = v.hoursPerLitre;
+  if (v.tankCapacityLitre != null) row.tank_capacity_litre = v.tankCapacityLitre;
+  if (v.fuelBalanceLitre != null) row.fuel_balance_litre = v.fuelBalanceLitre;
+  if (v.idealConsumptionRange !== undefined) row.ideal_consumption_range = v.idealConsumptionRange;
+  if (v.healthInputs !== undefined) row.health_inputs = v.healthInputs;
+  if (v.idealWorkingRange !== undefined) row.ideal_working_range = v.idealWorkingRange;
+  return row;
+}
+
+export function expenseToRow(e: Partial<Expense>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (e.id != null) row.id = e.id;
+  if (e.siteId != null) row.site_id = e.siteId;
+  if (e.amountRwf != null) row.amount_rwf = e.amountRwf;
+  if (e.description != null) row.description = e.description;
+  if (e.date != null) row.date = e.date;
+  if (e.type != null) row.type = e.type;
+  if (e.vehicleId !== undefined) row.vehicle_id = e.vehicleId;
+  if (e.litres !== undefined) row.litres = e.litres;
+  if (e.costPerLitre !== undefined) row.cost_per_litre = e.costPerLitre;
+  if (e.fuelCost !== undefined) row.fuel_cost = e.fuelCost;
+  return row;
+}
+
+export function tripToRow(t: Partial<Trip>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (t.id != null) row.id = t.id;
+  if (t.vehicleId != null) row.vehicle_id = t.vehicleId;
+  if (t.driverId != null) row.driver_id = t.driverId;
+  if (t.siteId != null) row.site_id = t.siteId;
+  if (t.startTime != null) row.start_time = t.startTime;
+  if (t.endTime !== undefined) row.end_time = t.endTime;
+  if (t.startLat !== undefined) row.start_lat = t.startLat;
+  if (t.startLon !== undefined) row.start_lon = t.startLon;
+  if (t.endLat !== undefined) row.end_lat = t.endLat;
+  if (t.endLon !== undefined) row.end_lon = t.endLon;
+  if (t.currentLat !== undefined) row.current_lat = t.currentLat ?? null;
+  if (t.currentLon !== undefined) row.current_lon = t.currentLon ?? null;
+  if (t.locationUpdatedAt !== undefined) row.location_updated_at = t.locationUpdatedAt ?? null;
+  if (t.distanceKm != null) row.distance_km = t.distanceKm;
+  if (t.loadQuantity !== undefined) row.load_quantity = t.loadQuantity;
+  if (t.status != null) row.status = t.status;
+  if (t.fuelFilledAtStart !== undefined) row.fuel_filled_at_start = t.fuelFilledAtStart;
+  if (t.fuelConsumed !== undefined) row.fuel_consumed = t.fuelConsumed;
+  if (t.photoUri !== undefined) row.photo_uri = t.photoUri;
+  return row;
+}
+
+export function machineSessionToRow(m: Partial<MachineSession>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (m.id != null) row.id = m.id;
+  if (m.vehicleId != null) row.vehicle_id = m.vehicleId;
+  if (m.driverId != null) row.driver_id = m.driverId;
+  if (m.siteId != null) row.site_id = m.siteId;
+  if (m.startTime != null) row.start_time = m.startTime;
+  if (m.endTime !== undefined) row.end_time = m.endTime;
+  if (m.durationHours !== undefined) row.duration_hours = m.durationHours;
+  if (m.fuelConsumed !== undefined) row.fuel_consumed = m.fuelConsumed;
+  if (m.status != null) row.status = m.status;
+  return row;
+}
+
+export function surveyToRow(s: Partial<Survey>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (s.id != null) row.id = s.id;
+  if (s.type != null) row.type = s.type;
+  if (s.siteId != null) row.site_id = s.siteId;
+  if (s.siteName !== undefined) row.site_name = s.siteName;
+  if (s.surveyorId != null) row.surveyor_id = s.surveyorId;
+  if (s.measurements != null) row.measurements = s.measurements;
+  if (s.location !== undefined) row.location = s.location;
+  if (s.photos != null) row.photos = s.photos;
+  if (s.status != null) row.status = s.status;
+  if (s.beforeFileContent !== undefined) row.before_file_content = s.beforeFileContent;
+  if (s.afterFileContent !== undefined) row.after_file_content = s.afterFileContent;
+  if (s.workVolume !== undefined) row.work_volume = s.workVolume;
+  if (s.approvedById !== undefined) row.approved_by_id = s.approvedById;
+  if (s.approvedAt !== undefined) row.approved_at = s.approvedAt;
+  return row;
+}
+
+export function issueToRow(i: Partial<Issue>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (i.id != null) row.id = i.id;
+  if (i.siteId != null) row.site_id = i.siteId;
+  if (i.siteName !== undefined) row.site_name = i.siteName;
+  if (i.raisedById != null) row.raised_by_id = i.raisedById;
+  if (i.description != null) row.description = i.description;
+  if (i.imageUris != null) row.image_uris = i.imageUris;
+  if (i.status != null) row.status = i.status;
+  return row;
+}
+
+export function taskToRow(t: Partial<Task>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (t.id != null) row.id = t.id;
+  if (t.title != null) row.title = t.title;
+  if (t.description != null) row.description = t.description;
+  if (t.siteId != null) row.site_id = t.siteId;
+  if (t.siteName !== undefined) row.site_name = t.siteName;
+  if (t.assignedTo != null) row.assigned_to = t.assignedTo;
+  if (t.status != null) row.status = t.status;
+  if (t.priority != null) row.priority = t.priority;
+  if (t.dueDate != null) row.due_date = t.dueDate;
+  if (t.progress != null) row.progress = t.progress;
+  if (t.updatedAt !== undefined) row.updated_at = t.updatedAt;
+  if (t.photos != null) row.photos = t.photos;
+  return row;
+}
+
+export function operationToRow(o: Partial<Operation>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (o.id != null) row.id = o.id;
+  if (o.name != null) row.name = o.name;
+  if (o.siteId != null) row.site_id = o.siteId;
+  if (o.siteName !== undefined) row.site_name = o.siteName;
+  if (o.type != null) row.type = o.type;
+  if (o.status != null) row.status = o.status;
+  if (o.budget != null) row.budget = o.budget;
+  if (o.spent != null) row.spent = o.spent;
+  if (o.startDate != null) row.start_date = o.startDate;
+  if (o.endDate !== undefined) row.end_date = o.endDate;
+  if (o.crew != null) row.crew = o.crew;
+  return row;
+}
+
+export function reportToRow(r: Partial<Report>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (r.id != null) row.id = r.id;
+  if (r.title != null) row.title = r.title;
+  if (r.type != null) row.type = r.type;
+  if (r.generatedDate != null) row.generated_date = r.generatedDate;
+  if (r.period != null) row.period = r.period;
+  if (r.data !== undefined) row.data = r.data;
+  return row;
+}

@@ -1,0 +1,61 @@
+Test Case ID,Module,Feature,Test Scenario,Test Steps,Expected Result,Priority,Status
+TC001,Authentication,Login,User can sign in with valid credentials,1. Open app. 2. Enter valid email and password. 3. Tap Sign In.,User is logged in and sees Dashboard tab content.,High,Not Run
+TC002,Authentication,Login,Login shows error when credentials are empty,1. Open app. 2. Leave email or password blank. 3. Tap Sign In.,Alert appears asking to enter both email and password.,High,Not Run
+TC003,Authentication,Login,Login shows error for invalid credentials,1. Open app. 2. Enter wrong email or password. 3. Tap Sign In.,Error alert is shown; user remains on login screen.,High,Not Run
+TC004,Authentication,Login,Login screen shows correct branding,1. Open app when not logged in.,Logo and "Hapyjo Ltd" and "Road Construction Management" text are visible.,Medium,Not Run
+TC005,Authentication,Logout,User can sign out from Settings,1. Log in. 2. Go to Settings tab. 3. Tap Sign out. 4. Confirm in alert.,User is signed out and login screen is shown.,High,Not Run
+TC006,Authentication,Session,App shows loading then content after session restore,1. Log in and close app. 2. Reopen app.,Loading appears briefly then main app with tabs is shown.,High,Not Run
+TC007,Navigation,Tab bar,Tabs visible match user role,1. Log in as admin. 2. Check visible tabs.,Dashboard Reports Tasks Users Sites Vehicles Expenses Surveys Issues GPS Camera Settings visible per RBAC.,High,Not Run
+TC008,Navigation,Tab bar,Driver sees only allowed tabs,1. Log in as driver_truck or driver_machine.,Only Dashboard Tasks Issues GPS Camera Settings tabs are visible.,High,Not Run
+TC009,Navigation,Tab bar,Tapping tab switches content,1. Log in. 2. Tap Reports tab. 3. Tap Settings tab.,Content area updates to Reports then to Settings.,High,Not Run
+TC010,Navigation,In-screen,Sites list opens site detail,1. Log in as head_supervisor or admin. 2. Go to Sites. 3. Tap a site.,Site detail screen shows with name location budget and assignments.,High,Not Run
+TC011,Navigation,In-screen,Settings opens Driver Profile for driver role,1. Log in as driver. 2. Go to Settings. 3. Tap Personal info.,Driver profile screen opens with name email phone.,High,Not Run
+TC012,Navigation,In-screen,Back from site detail returns to sites list,1. Open site detail from Sites. 2. Tap back.,Sites list is shown again.,Medium,Not Run
+TC013,Dashboard,Role-based,Admin dashboard loads with summary cards,1. Log in as admin. 2. Stay on Dashboard.,Admin dashboard shows active sites work volume truck distance machine hours.,High,Not Run
+TC014,Dashboard,Role-based,Owner dashboard loads,1. Log in as owner. 2. View Dashboard.,Owner dashboard shows sites and business metrics.,High,Not Run
+TC015,Dashboard,Role-based,Assistant supervisor sees site and tasks,1. Log in as assistant_supervisor. 2. View Dashboard.,Site card and Tasks at site and Reassign drivers link are visible.,High,Not Run
+TC016,Dashboard,Role-based,Driver dashboard shows task summary,1. Log in as driver. 2. View Dashboard.,Driver dashboard shows task summary and link to Tasks tab.,Medium,Not Run
+TC017,Users,User management,Add user modal opens and creates user,1. Log in as admin or owner or head_supervisor. 2. Go to Users. 3. Tap Add user. 4. Enter name role phone site and save.,New user is created; list updates; success or credentials shown.,High,Not Run
+TC018,Users,User management,Create user requires name,1. Open Add user modal. 2. Leave name empty. 3. Submit.,Validation prevents submit or shows error.,Medium,Not Run
+TC019,Users,Search,Search filters users by name or role,1. Go to Users. 2. Type in search box.,List filters to matching name or role; counts update.,High,Not Run
+TC020,Users,User management,Toggle user active status,1. Go to Users. 2. Toggle a user's active switch.,User active state updates; active/inactive counts reflect change.,Medium,Not Run
+TC021,Users,User management,Reset password shows credentials,1. Go to Users. 2. Tap reset password for a user.,Credentials or confirmation shown; user can copy.,Medium,Not Run
+TC022,Sites,Site management,Create new site opens modal and saves,1. Log in as head_supervisor. 2. Go to Sites. 3. Tap Create new site. 4. Enter name location budget and submit.,New site appears in list.,High,Not Run
+TC023,Sites,Site management,Allocate budget modal saves budget,1. Go to Sites as head_supervisor. 2. Tap Allocate budget. 3. Select site enter amount and save.,Site budget is updated.,High,Not Run
+TC024,Sites,Site detail,Save assignments updates site,1. Open site detail. 2. Assign assistant supervisor surveyor drivers vehicles. 3. Tap Save assignments.,Success; assignments are persisted.,High,Not Run
+TC025,Sites,Site detail,Site detail shows spent and progress,1. Open any site detail.,Spent amount and progress are displayed.,Medium,Not Run
+TC026,Vehicles,Vehicle list,Filter by All Truck Machine works,1. Go to Vehicles. 2. Tap Truck then Machine then All.,List shows only trucks then only machines then all.,High,Not Run
+TC027,Vehicles,Add vehicle,Add Truck modal saves new truck,1. Go to Vehicles. 2. Tap Add Truck. 3. Select site enter vehicle number mileage tank capacity and save.,New truck appears in list under site.,High,Not Run
+TC028,Vehicles,Add vehicle,Add Machine modal saves new machine,1. Tap Add Machine. 2. Fill site vehicle number hours per litre tank capacity. 3. Save.,New machine appears in list.,High,Not Run
+TC029,Vehicles,Add vehicle,Vehicle form validates required fields,1. Open Add Truck. 2. Leave tank capacity or mileage empty or zero. 3. Submit.,Validation prevents save or shows error.,Medium,Not Run
+TC030,Expenses,Expenses,Add general expense saves,1. Log in as assistant_supervisor. 2. Go to Expenses. 3. Tap Add expense. 4. Select site amount description date and submit.,Expense appears in list.,High,Not Run
+TC031,Expenses,Expenses,Add fuel expense saves,1. Go to Expenses. 2. Tap Add fuel expense. 3. Select site vehicle litres cost per litre and submit.,Fuel expense is saved and listed.,High,Not Run
+TC032,Expenses,Expenses,Expenses list grouped by site,1. Go to Expenses.,Expenses are shown grouped by site.,Medium,Not Run
+TC033,Surveys,Surveyor,New survey modal parses CSV and submits,1. Log in as surveyor. 2. Go to Surveys. 3. Tap New. 4. Select site enter before/after CSV tap Parse and submit.,Survey is submitted and appears in list.,High,Not Run
+TC034,Surveys,Assistant supervisor,Approve submitted survey,1. Log in as assistant_supervisor. 2. Go to Surveys. 3. In Submitted open one and tap Approve.,Survey moves to approved list.,High,Not Run
+TC035,Surveys,Surveys,Approved surveys list visible,1. Go to Surveys as surveyor or assistant.,Approved surveys section shows approved items.,Medium,Not Run
+TC036,Issues,Raise issue,Raise issue with description and images,1. Log in as driver or assistant_supervisor. 2. Go to Issues. 3. Tap Raise issue. 4. Select site enter description optionally add images and submit.,Issue is created and appears in list.,High,Not Run
+TC037,Issues,Filter,Site filter chips filter issues,1. Go to Issues. 2. Tap a site chip (not All).,List shows only issues for that site.,High,Not Run
+TC038,Issues,Issues list,Issues show status and site,1. Go to Issues.,Each issue shows description status badge site and date.,Medium,Not Run
+TC039,Driver Trips,Trips,Start trip modal saves and shows in progress,1. Log in as driver. 2. Go to Tasks. 3. Tap start trip/session. 4. Select vehicle enter load and fuel at start and submit.,Trip/session is started; in-progress card appears.,High,Not Run
+TC040,Driver Trips,Trips,End trip with optional photo,1. With an active trip tap End. 2. Optionally add GPS photo and location. 3. Submit.,Trip is ended; it appears in trip list.,High,Not Run
+TC041,Driver Trips,Supervisor,Supervisor can select driver and see trips,1. Log in as head_supervisor or assistant_supervisor. 2. Go to Tasks. 3. Select a driver from dropdown.,Trips and stats for selected driver are shown.,High,Not Run
+TC042,Driver Trips,Stats,Daily and monthly trip stats visible,1. Go to Tasks as driver or supervisor.,Daily/monthly trip count distance fuel stats are displayed.,Medium,Not Run
+TC043,GPS Camera,Upload,Capture and upload flow saves GPS photo,1. Log in as driver. 2. Go to GPS Camera. 3. Use Upload photo or Capture; select image and complete flow.,Status shows success; record saved to gps_photos.,High,Not Run
+TC045,Reports,Reports list,Reports screen loads with filter tabs,1. Log in as admin or owner or head_supervisor or accountant. 2. Go to Reports.,Filter tabs (All Financial Operations Site Performance) and report list are visible.,High,Not Run
+TC046,Reports,Generate,Generate report creates report,1. Go to Reports as admin/owner/head_supervisor. 2. Tap Generate report.,New report is created and appears in list; success alert.,High,Not Run
+TC047,Reports,Export,Export CSV opens share or saves file,1. Go to Reports. 2. Open a report card. 3. Tap Export CSV.,File is generated and share dialog or save works.,High,Not Run
+TC048,Reports,Read-only,Accountant cannot see Generate button,1. Log in as accountant. 2. Go to Reports.,Generate report button is hidden or disabled; list is view-only.,High,Not Run
+TC049,Reports,Filters,Fuel summary site and date filters work,1. Go to Reports. 2. Select site and date range in fuel summary.,Vehicle fuel summary updates for selected site and dates.,Medium,Not Run
+TC050,Reports,Financial,Financial summary visible for allowed roles,1. Log in as admin or owner or head_supervisor or accountant. 2. Go to Reports.,Financial summary section is visible.,Medium,Not Run
+TC051,Settings,Profile,Settings shows user name email and role,1. Log in. 2. Go to Settings.,User card shows correct name email and role badge.,High,Not Run
+TC052,Settings,Change password,Change password validates and updates,1. Go to Settings. 2. Tap Change password. 3. Enter new password and confirm (min 6 chars). 4. Submit.,Success alert; modal closes; password updated.,High,Not Run
+TC053,Settings,Change password,Password mismatch shows alert,1. Open Change password. 2. Enter different values in new and confirm. 3. Submit.,Alert shows mismatch message.,Medium,Not Run
+TC054,Settings,Preferences,Language toggle switches locale,1. Go to Settings. 2. Tap Language. 3. Select other locale.,Language label updates; app text uses new locale.,Medium,Not Run
+TC055,Settings,Preferences,Notifications toggle changes state,1. Go to Settings. 2. Toggle Notifications.,Toggle state changes (no push implementation required for demo).,Medium,Not Run
+TC056,Tasks,Task detail,Open task and view details,1. Log in as assistant_supervisor or driver. 2. From dashboard or Tasks open a task.,Task detail shows title description priority status site due date.,High,Not Run
+TC057,Tasks,Task detail,Update progress saves percentage,1. Open task detail. 2. Enter progress percentage. 3. Tap Save Progress.,Progress is updated and displayed.,High,Not Run
+TC058,Tasks,Task detail,Complete task shows confirmation,1. Open task. 2. Tap Complete Task. 3. Confirm.,Task is marked complete; confirmation shown.,High,Not Run
+TC059,Driver allocation,Assignment,Driver-vehicle allocation saves,1. Log in as assistant_supervisor. 2. Dashboard tap Reassign drivers to vehicles. 3. Select site assign drivers to vehicles. 4. Tap Save.,Assignments are saved.,High,Not Run
+TC060,Driver profile,Edit,Driver can edit name and phone,1. Log in as driver. 2. Settings > Personal info. 3. Tap Edit. 4. Change name or phone and Save.,Profile updates; changes visible on return.,High,Not Run
+TC061,Error handling,Page load,Dashboard and tabs load without crash,1. Log in with each role (admin owner head_supervisor accountant assistant_supervisor surveyor driver).,Each role sees correct dashboard and tabs; no crash.,High,Not Run

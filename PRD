@@ -1,0 +1,430 @@
+
+
+Below is your **FINAL REVISED PRD (v3)** for:
+
+# 📱 **HapyJo Ltd – Android Site Operations & Financial Control System**
+
+This includes your **Fuel Expense Improvement Requirement** for:
+
+✔ Per-Vehicle Fuel Entry
+✔ Cost per Litre Tracking
+✔ Auto Fuel Cost Calculation
+✔ Vehicle-Wise Fuel Summary
+✔ Combined Trucks + Machines Financial View
+✔ Dashboard Visibility for:
+
+* Owner
+* Admin
+* Head Supervisor
+* Accountant
+
+Currency:
+
+👉 **RWF (Rwandan Franc)**
+
+Default Language:
+
+👉 English
+Optional:
+
+👉 Kinyarwanda (from Settings)
+
+---
+
+# 🧭 SYSTEM PRINCIPLE
+
+All operations are managed under:
+
+```
+SITE LOCATION
+```
+
+Each Site Location contains:
+
+* One Assistant Supervisor
+* Surveyor
+* Drivers (Truck / Machine)
+* Assigned Trucks
+* Assigned Machines
+* Allocated Budget
+
+Assistant Supervisor becomes:
+
+👉 Local Budget Controller
+👉 Expense Owner
+👉 Fuel Usage Responsible
+👉 Driver Allocator
+
+---
+
+# 👥 USER ROLES
+
+## Management Level
+
+* Admin
+* Owner
+* Head Supervisor
+* Accountant
+
+## Site Level
+
+* Assistant Supervisor
+* Surveyor
+* Driver – Truck
+* Driver – Machine
+
+---
+
+# 🔐 USER MANAGEMENT
+
+Admin / Owner / Head Supervisor:
+
+✔ Create Users
+✔ Assign Roles
+✔ Activate / Deactivate
+
+Assistant Supervisor:
+
+✔ Can Allocate Drivers
+❌ Cannot Create Users
+
+---
+
+# 🚛 VEHICLE MASTER (Admin / Owner / Head Supervisor)
+
+## Trucks:
+
+* Vehicle Number
+* Mileage (KM per Litre)
+* Tank Capacity
+* Ideal Consumption Range
+* Health Inputs
+
+## Machines:
+
+* Machine ID
+* Consumption (Hours per Litre)
+* Tank Capacity
+* Ideal Working Range
+
+Used for:
+
+✔ Fuel Prediction
+✔ Efficiency Monitoring
+✔ Remaining Fuel Calculation
+
+---
+
+# 💰 BUDGET FLOW
+
+Head Supervisor:
+
+✔ Allocates Budget to Site Location
+
+Assistant Supervisor:
+
+Can use budget for:
+
+* Fuel
+* Labour (Driver Cost)
+* Other Site Expenses
+
+---
+
+# 🧾 EXPENSE MANAGEMENT (Assistant Supervisor)
+
+## Screen 1: General Expense Entry
+
+Fields:
+
+* Amount (RWF)
+* Description
+* Date
+
+---
+
+## Screen 2: **Vehicle Fuel Expense Entry (NEW)**
+
+Assistant Supervisor must select:
+
+* Vehicle Number
+* Vehicle Type (Truck / Machine)
+
+Then enter:
+
+* Number of Litres Filled
+* Cost per Litre (RWF)
+
+System Automatically Calculates:
+
+```
+Fuel Cost = Litres × Cost per Litre
+```
+
+This is recorded:
+
+✔ Vehicle-Wise
+✔ Location-Wise
+✔ Date-Wise
+
+---
+
+# ⛽ FUEL TRACKING SYSTEM
+
+Example:
+
+Truck Mileage = 10 KM/L
+Fuel Filled = 100L
+
+Trip Distance = 500 KM
+
+Fuel Used = 50L
+Remaining Fuel = 50L
+
+Remaining Fuel is shown for:
+
+* Truck
+* Machine
+
+For Machines:
+
+Hours / Litre Logic
+
+---
+
+## MID-SHIFT FUEL REFILL
+
+Assistant Supervisor or Driver can:
+
+✔ Add Additional Fuel during Trip or Machine Work
+
+System Updates:
+
+```
+Remaining Fuel =
+Previous Balance
++ Newly Filled Fuel
+– Consumption
+```
+
+---
+
+# 📊 VEHICLE FUEL SUMMARY REPORT
+
+Automatically Generated for:
+
+Each:
+
+* Truck
+* Machine
+
+Includes:
+
+* Total Fuel Filled
+* Total Fuel Cost
+* Total Distance / Hours Used
+* Expected Fuel Usage
+* Actual Fuel Usage
+* Remaining Fuel
+
+---
+
+## Visible To:
+
+* Admin
+* Owner
+* Head Supervisor
+* Accountant
+
+Combined Summary:
+
+✔ All Trucks
+✔ All Machines
+✔ Site-Wise
+✔ Date-Wise
+
+---
+
+# 📍 SITE LOCATION USER ALLOCATION
+
+Head Supervisor:
+
+Assigns per location:
+
+* Assistant Supervisor
+* Surveyor
+* Drivers – Truck
+* Drivers – Machine
+
+Assistant Supervisor:
+
+✔ Can Reassign Drivers Across Vehicles
+
+Drivers are dynamic.
+
+---
+
+# 🚚 DRIVER – TRUCK MODULE
+
+---
+
+## Screen 0: Personal Info
+
+(Name / Email / Phone)
+
+---
+
+## Screen 1: Driver Dashboard
+
+Displays:
+
+* Total Trips
+* Distance Travelled
+* Trips by Location
+* Trips by Vehicle
+* Daily / Monthly / Yearly Summary
+
+Supervisor can view same.
+
+---
+
+## Screen 2: Create Trip
+
+Fields:
+
+* Vehicle Number
+* Load Quantity
+* Fuel Filled (Optional)
+* Start Button
+* End Button
+
+Start:
+
+✔ Begins GPS Tracking
+
+End:
+
+✔ Requires Geo-Tagged Photo
+
+System Calculates:
+
+* Distance
+* Time
+* KM per Hour
+* Fuel Consumed
+
+---
+
+# 🏗 DRIVER – MACHINE MODULE
+
+Same logic as Truck
+But:
+
+* Start Time
+* End Time
+* Total Working Hours
+
+Fuel:
+
+Hours / Litre
+
+---
+
+# 📐 SURVEY MODULE
+
+Surveyor Uploads:
+
+* Before File
+* After File
+
+Assistant Supervisor:
+
+✔ Approves
+
+After approval:
+
+Visible To:
+
+* Admin
+* Owner
+* Head Supervisor
+
+---
+
+# 🚨 ISSUE RAISING
+
+Accessible by:
+
+* Driver
+* Assistant Supervisor
+
+Fields:
+
+* Issue Description
+* Attach Images
+
+Notification sent to:
+
+* Head Supervisor
+* Owner
+* Assistant Supervisor
+
+---
+
+# 📊 MANAGEMENT DASHBOARD
+
+(Admin / Owner / Accountant / Head Supervisor)
+
+Shows:
+
+* Work Volume
+* Machine Hours
+* Truck Distance
+* Site Expenses
+* Fuel Usage
+* Vehicle Fuel Cost
+* Revenue
+* Profit
+
+(All in RWF)
+
+---
+
+# 🔁 FINAL FLOW
+
+1. Admin creates Owner
+2. Owner creates users
+3. Head Supervisor creates Site Locations
+4. Head Supervisor allocates Budget
+5. Assistant Supervisor records:
+
+   * Expenses
+   * Fuel Entries per Vehicle
+6. Drivers execute trips
+7. Surveyor uploads volume
+8. Assistant Supervisor approves survey
+9. System generates:
+
+   * Fuel Summary
+   * Expense Summary
+   * Profit
+
+---
+
+# 📱 OUTPUT
+
+Android Application for:
+
+**HapyJo Ltd**
+
+✔ Multi-Language
+✔ RWF Currency
+✔ Fuel Cost Tracking per Vehicle
+✔ Budget Monitoring
+✔ GPS Trip Tracking
+✔ Driver Allocation
+✔ Expense Management
+✔ Survey Verification
+✔ Profit Dashboard
+
+This is your **FINAL REVISED PRD with RBAC + Screens + Nested Screens** for end-to-end Android delivery.

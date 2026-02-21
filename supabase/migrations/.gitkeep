@@ -1,0 +1,1 @@
+# Keeps migrations folder in git. Add migration files as: YYYYMMDDHHMMSS_description.sql

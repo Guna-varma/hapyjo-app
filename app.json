@@ -1,0 +1,69 @@
+{
+  "expo": {
+    "name": "Hapyjo Ltd",
+    "slug": "hapyjo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/hapyjo_playstore_icon_v2_1024.png",
+    "scheme": "hapyjo",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/hapyjo_playstore_icon_v2_1024.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "package": "com.hapyjo.attendance"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/hapyjo_playstore_icon_v2_1024.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/hapyjo_playstore_icon_v2_1024.png",
+          "imageWidth": 280,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Hapyjo to access the camera for GPS-tagged photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Hapyjo to use your location for GPS stamps on photos."
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7e8c7f84-33b9-4891-9d3c-a15b253f962d"
+      }
+    }
+  }
+}
