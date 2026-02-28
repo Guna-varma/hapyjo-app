@@ -225,8 +225,11 @@ export const rn: Record<EnKeys, string> = {
   sites_loading: 'Iyerekura ahantu...',
   sites_invalid_input: 'Hitamo ahantu kandi andika igiciro cyiza mu RWF.',
   sites_budget_update_failed: 'Kuvugurura igiciro byanze.',
+  sites_save_assignments_failed: 'Kubika igahiro byanze. Nyamuneka subira ugerageze.',
   sites_required_fields: 'Izina rya rwego naho riherereye birakenewe.',
   sites_create_failed: 'Kurema ahantu byanze.',
+  sites_toast_budget_updated: 'Igiciro cyavuguruwe',
+  sites_toast_site_created: 'Ahantu garemye',
   sites_name_placeholder: 'urugero: Kigali-Rwamagana',
   sites_location_placeholder: 'urugero: Intara y\'Iburasirazuba',
   sites_budget_placeholder: 'urugero: 5000000',
@@ -282,6 +285,8 @@ export const rn: Record<EnKeys, string> = {
 
   expenses_add_failed: 'Kongeramo amafaranga byanze.',
   expenses_fuel_failed: 'Kongeramo amavuta byanze.',
+  expenses_toast_added: 'Amarangwa yongewe',
+  expenses_toast_fuel_added: 'Amarangwa y\'amavuta yongewe',
   expenses_subtitle_full: 'Amafaranga n\'amavuta',
   expenses_amount_info: 'Injiza igiciro mu RWF. Imibare gusa.',
   expenses_amount_placeholder: 'urugero: 50000',
@@ -337,6 +342,13 @@ export const rn: Record<EnKeys, string> = {
   reports_to_placeholder: 'Hitamo itariki y\'imperuka',
 
   vehicles_add_failed: 'Kongeramo imodoka byanze.',
+  vehicles_toast_added_truck: 'Imodoka yongewe',
+  vehicles_toast_added_machine: 'Imashini yongewe',
+  vehicles_toast_saved: 'Imodoka yabikwa',
+  vehicles_sync_from_website: 'Sinyora kuva ku web',
+  vehicles_sync_toast_none: 'Nta modoka nshya yo kusinyora kuva ku web.',
+  vehicles_sync_toast_count: '{{count}} imodoka sinyowe kuva ku web.',
+  vehicles_sync_failed: 'Gusinyora imodoka kuva ku web byanze.',
   vehicles_number_placeholder: 'urugero: TRK-004',
   vehicles_mileage_placeholder: 'urugero: 10',
   vehicles_range_placeholder: 'urugero: 8–12 km/L',
@@ -351,6 +363,8 @@ export const rn: Record<EnKeys, string> = {
   surveys_subtitle_surveyor: 'Ohereza kandi urebe suzuma zawe',
   surveys_subtitle_assistant: 'Emeza suzuma zoherejwe ku rwego rwawe',
   surveys_empty_surveyor: 'Nta suzuma ubu. Teka Gushya kugira ngo ongeze.',
+  surveys_toast_submitted: 'Suzuma yoherejwe',
+  surveys_toast_approved: 'Suzuma yemewe',
   surveys_subtitle_view: 'Reba suzuma zemewe',
   surveys_coords_placeholder: 'pt0,4746483.0150,...',
 
@@ -463,6 +477,7 @@ export const rn: Record<EnKeys, string> = {
   settings_change_password_hint: 'Shyira ijambobanga rishya (urugero: nyuma yo kwinjira bwa mbere)',
 
   notification_new_issue: 'Ikibazo gishya cyatanzwe',
+  notifications_empty: 'Nta matangazo ubu.',
 
   general_none: 'Nta na kimwe',
   general_cancel: 'Hagarika',

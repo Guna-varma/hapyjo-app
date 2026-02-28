@@ -60,6 +60,7 @@ export function useResponsiveTheme(): ResponsiveTheme {
     const scale = (v: number) => scaleByWidth(v, dimensions);
     const scaleMin = (v: number) => scaleByMinDimension(v, dimensions);
     const isNarrow = dimensions.width < 360;
+    const isShort = dimensions.height < 600;
     return {
       width: dimensions.width,
       height: dimensions.height,
@@ -70,7 +71,7 @@ export function useResponsiveTheme(): ResponsiveTheme {
       tabIconSize: scale(22),
       tabLabelSize: scale(11),
       tabPaddingH: scale(8),
-      tabPaddingV: scale(10),
+      tabPaddingV: isShort ? scale(8) : scale(10),
       tabItemMinWidth: isNarrow ? 64 : 72,
       fontSizeBase: scale(16),
       fontSizeTitle: scale(22),

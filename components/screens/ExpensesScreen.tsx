@@ -12,6 +12,7 @@ import {
   TouchableWithoutFeedback,
   ScrollView,
   StyleSheet,
+  RefreshControl,
 } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
@@ -19,17 +20,20 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { DashboardLayout } from '@/components/ui/DashboardLayout';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useToast } from '@/context/ToastContext';
 import { generateId } from '@/lib/id';
 import { formatAmount, formatPerUnit } from '@/lib/currency';
-import { Receipt, Fuel } from 'lucide-react-native';
+import { Banknote, Fuel } from 'lucide-react-native';
 import { InfoButton } from '@/components/ui/InfoButton';
 import { colors, layout, form } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
 
 export function ExpensesScreen() {
   const { t } = useLocale();
-  const { sites, vehicles, expenses, addExpense } = useMockAppStore();
+  const { sites, vehicles, expenses, addExpense, refetch } = useMockAppStore();
+  const { showToast } = useToast();
   const [generalModalVisible, setGeneralModalVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [fuelModalVisible, setFuelModalVisible] = useState(false);
 
   const [siteId, setSiteId] = useState(sites[0]?.id ?? '');
@@ -64,6 +68,7 @@ export function ExpensesScreen() {
       setGeneralModalVisible(false);
       setAmountRwf('');
       setDescription('');
+      showToast(t('expenses_toast_added'));
     } catch {
       Alert.alert(t('alert_error'), t('expenses_add_failed'));
     }
@@ -95,8 +100,18 @@ export function ExpensesScreen() {
       setLitres('');
       setCostPerLitre('');
       setVehicleId('');
+      showToast(t('expenses_toast_fuel_added'));
     } catch {
       Alert.alert(t('alert_error'), t('expenses_fuel_failed'));
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -114,7 +129,11 @@ export function ExpensesScreen() {
   return (
     <View style={expStyles.screen}>
       <Header title={t('expenses_title')} subtitle={t('expenses_subtitle_full')} rightAction={null} />
-      <DashboardLayout keyboardShouldPersistTaps="handled" onScrollBeginDrag={() => Keyboard.dismiss()}>
+      <DashboardLayout
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={() => Keyboard.dismiss()}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
+      >
         <View style={expStyles.actionsRow}>
           <TouchableOpacity
             onPress={() => {
@@ -126,7 +145,7 @@ export function ExpensesScreen() {
             }}
             style={expStyles.primaryBtn}
           >
-            <Receipt size={24} color="#fff" />
+            <Banknote size={24} color="#fff" />
             <Text style={expStyles.primaryBtnText}>{t('expenses_add_expense')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -164,9 +183,9 @@ export function ExpensesScreen() {
 
       <Modal visible={generalModalVisible} transparent animationType="slide">
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={expStyles.modalOverlay}>
-            <KeyboardAvoidingView behavior="padding" style={expStyles.modalKAV}>
-              <Pressable onPress={(e) => e.stopPropagation()} style={expStyles.modalSheet}>
+          <View style={modalStyles.overlay}>
+            <KeyboardAvoidingView behavior="padding" style={{ width: '100%' }}>
+              <Pressable onPress={(e) => e.stopPropagation()} style={modalStyles.sheet}>
                 <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                   <Text style={modalStyles.title}>{t('expenses_add_expense_rwf')}</Text>
                   <Text style={modalStyles.label}>{t('expenses_site_star')}</Text>
@@ -202,9 +221,9 @@ export function ExpensesScreen() {
 
       <Modal visible={fuelModalVisible} transparent animationType="slide">
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={expStyles.modalOverlay}>
-            <KeyboardAvoidingView behavior="padding" style={expStyles.modalKAV}>
-              <Pressable onPress={(e) => e.stopPropagation()} style={expStyles.modalSheet}>
+          <View style={modalStyles.overlay}>
+            <KeyboardAvoidingView behavior="padding" style={{ width: '100%' }}>
+              <Pressable onPress={(e) => e.stopPropagation()} style={modalStyles.sheet}>
                 <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                   <Text style={modalStyles.title}>{t('expenses_add_fuel')}</Text>
                   <Text style={modalStyles.label}>{t('tab_sites')}</Text>

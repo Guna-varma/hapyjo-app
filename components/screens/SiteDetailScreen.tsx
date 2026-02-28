@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Pressable,
+  Alert,
 } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
@@ -80,8 +81,9 @@ export function SiteDetailScreen({ site, onBack }: SiteDetailScreenProps) {
         driverIds: driverIds.length ? driverIds : undefined,
         vehicleIds: selectedVehicleIds.length ? selectedVehicleIds : undefined,
       });
+      onBack();
     } catch {
-      // Error surfaced by store or realtime
+      Alert.alert(t('alert_error'), t('sites_save_assignments_failed'));
     }
   };
 

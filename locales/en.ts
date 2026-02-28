@@ -223,8 +223,11 @@ export const en = {
   sites_loading: 'Loading sites...',
   sites_invalid_input: 'Select a site and enter a valid amount in RWF.',
   sites_budget_update_failed: 'Failed to update budget',
+  sites_save_assignments_failed: 'Failed to save assignments. Please try again.',
   sites_required_fields: 'Site name and location are required.',
   sites_create_failed: 'Failed to create site',
+  sites_toast_budget_updated: 'Budget updated',
+  sites_toast_site_created: 'Site created',
   sites_name_placeholder: 'e.g. Kigali-Rwamagana Highway',
   sites_location_placeholder: 'e.g. Eastern Province',
   sites_budget_placeholder: 'e.g. 5000000',
@@ -280,6 +283,8 @@ export const en = {
 
   expenses_add_failed: 'Failed to add expense',
   expenses_fuel_failed: 'Failed to add fuel expense',
+  expenses_toast_added: 'Expense added',
+  expenses_toast_fuel_added: 'Fuel expense added',
   expenses_subtitle_full: 'General and fuel expenses',
   expenses_amount_info: 'Enter the expense amount in Rwandan Francs (RWF). Numbers only.',
   expenses_amount_placeholder: 'e.g. 50000',
@@ -335,6 +340,13 @@ export const en = {
   reports_to_placeholder: 'Pick end date',
 
   vehicles_add_failed: 'Failed to add vehicle',
+  vehicles_toast_added_truck: 'Truck added',
+  vehicles_toast_added_machine: 'Machine added',
+  vehicles_toast_saved: 'Vehicle saved',
+  vehicles_sync_from_website: 'Sync from website',
+  vehicles_sync_toast_none: 'No new vehicles to sync from website.',
+  vehicles_sync_toast_count: '{{count}} vehicle(s) synced from website.',
+  vehicles_sync_failed: 'Failed to sync vehicles from website.',
   vehicles_number_placeholder: 'e.g. TRK-004',
   vehicles_mileage_placeholder: 'e.g. 10',
   vehicles_range_placeholder: 'e.g. 8–12 km/L',
@@ -350,6 +362,8 @@ export const en = {
   surveys_subtitle_assistant: 'Approve submitted surveys for your sites',
   surveys_subtitle_view: 'View approved surveys',
   surveys_empty_surveyor: 'No surveys yet. Tap New to add one.',
+  surveys_toast_submitted: 'Survey submitted',
+  surveys_toast_approved: 'Survey approved',
   surveys_coords_placeholder: 'pt0,4746483.0150,...',
 
   dashboard_surveyor_title: 'Survey Dashboard',
@@ -461,6 +475,7 @@ export const en = {
   settings_change_password_hint: 'Set a new password (e.g. after first login)',
 
   notification_new_issue: 'New issue reported',
+  notifications_empty: 'No notifications yet.',
 
   general_none: 'None',
   general_cancel: 'Cancel',

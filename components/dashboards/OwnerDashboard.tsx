@@ -9,7 +9,7 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { useLocale } from '@/context/LocaleContext';
-import { TrendingUp, DollarSign, PieChart, Settings, FileText, Building2, Users, Globe } from 'lucide-react-native';
+import { TrendingUp, Banknote, PieChart, Settings, FileText, Building2, Users, Globe } from 'lucide-react-native';
 import { colors, layout, form } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
 
@@ -138,7 +138,7 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
           </Card>
           <Card style={ownerStyles.metricCard}>
             <View style={ownerStyles.metricContent}>
-              <DollarSign size={24} color="#8B5CF6" />
+              <Banknote size={24} color="#8B5CF6" />
               <Text style={ownerStyles.metricValue}>{formatAmount(totalCost, true)}</Text>
               <Text style={ownerStyles.metricLabel}>{t('dashboard_total_cost')}</Text>
             </View>
@@ -184,30 +184,29 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
 
       <Modal visible={rateModalVisible} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={ownerStyles.modalOverlay}>
-            <KeyboardAvoidingView behavior="padding" style={ownerStyles.modalKAV}>
-              <Pressable onPress={(e) => e.stopPropagation()} style={ownerStyles.modalSheet}>
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                  <Text style={modalStyles.title}>{t('owner_contract_rate_title')}</Text>
-                  <TextInput
-                    value={rateInput}
-                    onChangeText={setRateInput}
-                    placeholder={t('owner_contract_rate_placeholder')}
-                    keyboardType="number-pad"
-                    style={modalStyles.input}
-                    placeholderTextColor={colors.placeholder}
-                  />
-                  <View style={modalStyles.footer}>
-                    <TouchableOpacity onPress={() => setRateModalVisible(false)} style={[modalStyles.btn, modalStyles.btnSecondary]}>
-                      <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={saveContractRate} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
-                      <Text style={ownerStyles.btnPrimaryText}>{t('common_save')}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              </Pressable>
-            </KeyboardAvoidingView>
+          <View style={modalStyles.overlayCenter}>
+            <Pressable onPress={(e) => e.stopPropagation()} style={modalStyles.sheetCenter}>
+              <KeyboardAvoidingView behavior="padding">
+                <Text style={modalStyles.title}>{t('owner_contract_rate_title')}</Text>
+                <Text style={modalStyles.label}>{t('owner_contract_rate_placeholder')}</Text>
+                <TextInput
+                  value={rateInput}
+                  onChangeText={setRateInput}
+                  placeholder="e.g. 500"
+                  keyboardType="number-pad"
+                  style={modalStyles.input}
+                  placeholderTextColor={colors.placeholder}
+                />
+                <View style={modalStyles.footer}>
+                  <TouchableOpacity onPress={() => setRateModalVisible(false)} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+                    <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={saveContractRate} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_save')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </Pressable>
           </View>
         </TouchableWithoutFeedback>
       </Modal>

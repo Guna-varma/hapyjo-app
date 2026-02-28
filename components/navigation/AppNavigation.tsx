@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform, StatusBar, Alert } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
@@ -25,8 +26,10 @@ import {
   Camera,
   RefreshCw,
   Bell,
+  LogOut,
 } from 'lucide-react-native';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { NotificationsModal } from '@/components/ui/NotificationsModal';
 import { GpsCameraScreen } from '@/features/gpsCamera/GpsCameraScreen';
 import { VehiclesScreen } from '@/components/screens/VehiclesScreen';
 import { ExpensesScreen } from '@/components/screens/ExpensesScreen';
@@ -56,10 +59,11 @@ function useTopSafeInset(): number {
 }
 
 export function AppNavigation() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { t, locale } = useLocale();
   const { refetch, loading, notifications } = useMockAppStore();
   const topInset = useTopSafeInset();
+  const insets = useSafeAreaInsets();
   const theme = useResponsiveTheme();
   const tabIds = useMemo(
     () => (user ? getTabsForRole(user.role) : (['dashboard', 'settings'] as TabId[])),
@@ -67,6 +71,7 @@ export function AppNavigation() {
   );
   const [activeTab, setActiveTab] = useState<TabId>(tabIds[0]);
   const [refreshing, setRefreshing] = useState(false);
+  const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
@@ -77,6 +82,13 @@ export function AppNavigation() {
       setRefreshing(false);
     }
   }, [refetch, refreshing]);
+
+  const handleLogout = useCallback(() => {
+    Alert.alert(t('settings_confirm_logout'), t('settings_confirm_logout_message'), [
+      { text: t('common_cancel'), style: 'cancel' },
+      { text: t('settings_sign_out'), style: 'destructive', onPress: () => logout() },
+    ]);
+  }, [t, logout]);
 
   const tabIdsKey = tabIds.join(',');
   useEffect(() => {
@@ -156,7 +168,7 @@ export function AppNavigation() {
           </TouchableOpacity>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <TouchableOpacity
-              onPress={() => setActiveTab('settings')}
+              onPress={() => setNotificationsModalVisible(true)}
               style={{ position: 'relative', padding: 4 }}
               accessibilityLabel={t('settings_notifications')}
             >
@@ -169,6 +181,9 @@ export function AppNavigation() {
                 </View>
               )}
             </TouchableOpacity>
+            <TouchableOpacity onPress={handleLogout} style={{ padding: 4 }} accessibilityLabel={t('settings_sign_out')}>
+              <LogOut size={22} color="#475569" />
+            </TouchableOpacity>
             <LanguageSwitcher />
           </View>
         </View>
@@ -177,8 +192,8 @@ export function AppNavigation() {
         </View>
       </View>
 
-      {/* Bottom Tab Bar – alignment by icon count: 1–3 center, 4–5 space-evenly, 6+ scrollable */}
-      <View style={{ backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: 'rgba(226,232,240,0.9)', paddingVertical: theme.tabPaddingV, paddingHorizontal: theme.tabPaddingH }}>
+      {/* Bottom Tab Bar – minimal bottom padding; Android: fixed to avoid excess white space, iOS: safe area */}
+      <View style={{ backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: 'rgba(226,232,240,0.9)', paddingTop: theme.tabPaddingV, paddingBottom: Platform.OS === 'android' ? theme.tabPaddingV : Math.max(insets.bottom, theme.tabPaddingV), paddingHorizontal: theme.tabPaddingH }}>
         {footerScrollable ? (
           <ScrollView
             horizontal
@@ -195,7 +210,7 @@ export function AppNavigation() {
               return (
                 <TouchableOpacity
                   key={tab.id}
-                  onPress={() => setActiveTab(tab.id)}
+                  onPress={() => { Haptics.selectionAsync(); setActiveTab(tab.id); }}
                   activeOpacity={0.75}
                   style={{
                     alignItems: 'center',
@@ -230,7 +245,7 @@ export function AppNavigation() {
               return (
                 <TouchableOpacity
                   key={tab.id}
-                  onPress={() => setActiveTab(tab.id)}
+                  onPress={() => { Haptics.selectionAsync(); setActiveTab(tab.id); }}
                   activeOpacity={0.75}
                   style={{
                     alignItems: 'center',
@@ -252,6 +267,11 @@ export function AppNavigation() {
           </View>
         )}
       </View>
+
+      <NotificationsModal
+        visible={notificationsModalVisible}
+        onClose={() => setNotificationsModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }

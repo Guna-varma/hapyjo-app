@@ -5,7 +5,7 @@ import { Header } from '@/components/ui/Header';
 import { useAuth } from '@/context/AuthContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
-import { colors, dimensions, spacing } from '@/theme/tokens';
+import { colors, dimensions, spacing, radius } from '@/theme/tokens';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { getRoleLabelKey } from '@/lib/rbac';
 import { useLocale } from '@/context/LocaleContext';
@@ -130,9 +130,9 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
                   <Pressable
                     key={sid}
                     onPress={() => setSelectedSiteIndex(idx)}
-                    className={`px-3 py-2 rounded-lg ${active ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, backgroundColor: active ? colors.primary : colors.gray200 }}
                   >
-                    <Text className={active ? 'text-white font-medium' : 'text-gray-700'}>{s?.name ?? sid}</Text>
+                    <Text style={{ color: active ? '#fff' : colors.text, fontWeight: '500' }}>{s?.name ?? sid}</Text>
                   </Pressable>
                 );
               })}
@@ -146,12 +146,12 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
           {freeVehicles.length === 0 ? (
             <Text className="text-gray-600 text-sm">{t('driver_allocation_all_assigned')}</Text>
           ) : (
-            <View className="flex-row flex-wrap gap-2">
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {freeVehicles.map((v) => (
-                <View key={v.id} className="px-3 py-2 rounded-lg bg-white border border-green-200 flex-row items-center">
-                  <Truck size={14} color="#059669" />
-                  <Text className="ml-1 font-medium text-gray-800">{v.vehicleNumberOrId}</Text>
-                  <Text className="ml-1 text-xs text-green-700">({t('vehicles_free')})</Text>
+                <View key={v.id} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', alignItems: 'center' }}>
+                  <Truck size={14} color={colors.primary} />
+                  <Text style={{ marginLeft: 8, fontWeight: '500', color: colors.text }}>{v.vehicleNumberOrId}</Text>
+                  <Text style={{ marginLeft: 8, fontSize: 12, color: colors.textSecondary }}>({t('vehicles_free')})</Text>
                 </View>
               ))}
             </View>
@@ -165,7 +165,7 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
           siteDrivers.map((driver) => (
             <Card key={driver.id} className="mb-4">
               <View className="flex-row items-center mb-2">
-                <User size={20} color="#3B82F6" />
+                <User size={20} color={colors.primary} />
                 <Text className="font-semibold text-gray-900 ml-2">{driver.name}</Text>
                 <Text className="text-xs text-gray-500 ml-2">({t(getRoleLabelKey(driver.role))})</Text>
               </View>
@@ -179,12 +179,12 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
                     <Pressable
                       key={v.id}
                       onPress={() => toggleDriverVehicle(driver.id, v.id)}
-                      className={`px-3 py-2 rounded-lg flex-row items-center ${selected ? 'bg-blue-600' : 'bg-gray-200'}`}
+                      style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', backgroundColor: selected ? colors.primary : colors.gray200 }}
                     >
-                      <Truck size={14} color={selected ? '#fff' : '#374151'} />
-                      <Text className={`ml-1 font-medium ${selected ? 'text-white' : 'text-gray-700'}`}>{v.vehicleNumberOrId}</Text>
+                      <Truck size={14} color={selected ? '#fff' : colors.text} />
+                      <Text style={{ marginLeft: 8, fontWeight: '500', color: selected ? '#fff' : colors.text }}>{v.vehicleNumberOrId}</Text>
                       {!selected && assignedTo.length > 0 && (
-                        <Text className="ml-1 text-xs text-gray-500">→ {assignedLabel}</Text>
+                        <Text style={{ marginLeft: 8, fontSize: 12, color: colors.textSecondary }}>→ {assignedLabel}</Text>
                       )}
                     </Pressable>
                   );

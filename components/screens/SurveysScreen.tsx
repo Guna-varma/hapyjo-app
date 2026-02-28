@@ -6,15 +6,17 @@ import {
   TouchableOpacity,
   TextInput,
   Pressable,
-  ActivityIndicator,
   Keyboard,
+  RefreshControl,
 } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { Badge } from '@/components/ui/Badge';
+import { SkeletonList } from '@/components/ui/SkeletonLoader';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { parseSurveyFileContent, computeWorkVolume, computeCubature } from '@/lib/surveyParser';
 import { generateId } from '@/lib/id';
@@ -29,7 +31,9 @@ export function SurveysScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, surveys, siteAssignments, addSurvey, updateSurvey, loading } = useMockAppStore();
+  const { sites, surveys, siteAssignments, addSurvey, updateSurvey, refetch, loading } = useMockAppStore();
+  const { showToast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
   const isSurveyor = user?.role === 'surveyor';
   const isAssistantSupervisor = user?.role === 'assistant_supervisor';
   const mySiteIds = (user?.id ? siteAssignments.filter((a) => a.userId === user.id).map((a) => a.siteId) : []) as string[];
@@ -88,18 +92,29 @@ export function SurveysScreen() {
       setAfterText('');
       setParsedVolume(null);
       setParsedCubature(null);
+      showToast(t('surveys_toast_submitted'));
     } finally {
       setSubmittingSurvey(false);
     }
   };
 
-  const approveSurvey = (surveyId: string) => {
+  const approveSurvey = async (surveyId: string) => {
     if (!user?.id) return;
-    updateSurvey(surveyId, {
+    await updateSurvey(surveyId, {
       status: 'approved',
       approvedById: user.id,
       approvedAt: new Date().toISOString(),
     });
+    showToast(t('surveys_toast_approved'));
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const statusVariant = { draft: 'default' as const, submitted: 'warning' as const, approved: 'success' as const };
@@ -129,12 +144,13 @@ export function SurveysScreen() {
         }
       />
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
+      >
         {loading ? (
-          <View className="py-12 items-center">
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text className="text-gray-600 mt-3">{t('surveys_loading')}</Text>
-          </View>
+          <SkeletonList count={5} />
         ) : isSurveyor ? (
           <>
             <Text className="text-lg font-bold text-gray-900 mb-2">{t('surveys_my_surveys')}</Text>

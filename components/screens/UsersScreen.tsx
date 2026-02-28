@@ -1,18 +1,22 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, Pressable, Alert, Linking, Switch, Keyboard } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, Pressable, Alert, Linking, Switch, Keyboard, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, RefreshControl } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Header } from '@/components/ui/Header';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SkeletonList } from '@/components/ui/SkeletonLoader';
 import { useAuth } from '@/context/AuthContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { useLocale } from '@/context/LocaleContext';
 import { canCreateUser, getRoleLabelKey, getAssignableRoles } from '@/lib/rbac';
 import type { UserRole, User } from '@/types';
 import { User as UserIcon, Mail, Phone, MapPin, Plus, Search, Copy, MessageCircle, Pencil, KeyRound } from 'lucide-react-native';
 import { InfoButton } from '@/components/ui/InfoButton';
+import { modalStyles } from '@/components/ui/modalStyles';
+import { colors } from '@/theme/tokens';
 
 const DOMAIN = 'hapyjo.com';
 
@@ -47,7 +51,9 @@ export function UsersScreen() {
   const { user: currentUser } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { users, updateUser, createUserByOwner, resetUserPassword, setSiteAssignment, sites, loading } = useMockAppStore();
+  const { users, updateUser, createUserByOwner, resetUserPassword, setSiteAssignment, sites, refetch, loading } = useMockAppStore();
+  const { showToast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newName, setNewName] = useState('');
@@ -64,6 +70,7 @@ export function UsersScreen() {
   const [editSiteId, setEditSiteId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [userFilter, setUserFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
   const existingEmails = useMemo(() => users.map((u) => u.email.toLowerCase()), [users]);
   const generatedEmail = useMemo(
@@ -85,12 +92,27 @@ export function UsersScreen() {
     return users;
   }, [users, currentUser]);
 
-  const filteredUsers = visibleUsers.filter(
+  const filteredByStatus =
+    userFilter === 'active'
+      ? visibleUsers.filter((u) => u.active)
+      : userFilter === 'inactive'
+        ? visibleUsers.filter((u) => !u.active)
+        : visibleUsers;
+  const filteredUsers = filteredByStatus.filter(
     (u) =>
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t(getRoleLabelKey(u.role)).toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const getRoleBadgeVariant = (role: UserRole): 'success' | 'info' | 'warning' | 'default' => {
     const variants: Record<UserRole, 'success' | 'info' | 'warning' | 'default'> = {
@@ -238,7 +260,7 @@ export function UsersScreen() {
 
   const handleCopyCredentials = async () => {
     if (!credentialsModal) return;
-    const text = `HapyJo login\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}`;
+    const text = `Your HapyJo login:\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}\n\n${t('users_share_login_body')}`;
     await Clipboard.setStringAsync(text);
     Alert.alert(t('alert_copied'), t('users_copied'));
   };
@@ -273,14 +295,13 @@ export function UsersScreen() {
       />
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding }}
+        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={() => Keyboard.dismiss()}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
       >
         {loading ? (
-          <Card className="py-8">
-            <Text className="text-center text-gray-600">{t('common_loading')}</Text>
-          </Card>
+          <SkeletonList count={5} />
         ) : (
           <>
             <View className="mb-4">
@@ -297,24 +318,30 @@ export function UsersScreen() {
             </View>
 
             <View className="flex-row mb-4 gap-3">
-              <Card className="flex-1 bg-blue-50">
-                <View className="items-center py-2">
-                  <Text className="text-2xl font-bold text-gray-900">{users.filter((u) => u.active).length}</Text>
-                  <Text className="text-xs text-gray-600">{t('users_active_users')}</Text>
-                </View>
-              </Card>
-              <Card className="flex-1 bg-gray-100">
-                <View className="items-center py-2">
-                  <Text className="text-2xl font-bold text-gray-900">{users.filter((u) => !u.active).length}</Text>
-                  <Text className="text-xs text-gray-600">{t('users_inactive_users')}</Text>
-                </View>
-              </Card>
-              <Card className="flex-1 bg-purple-50">
-                <View className="items-center py-2">
-                  <Text className="text-2xl font-bold text-gray-900">{users.length}</Text>
-                  <Text className="text-xs text-gray-600">{t('users_total_users')}</Text>
-                </View>
-              </Card>
+              <Pressable onPress={() => setUserFilter('active')} className="flex-1">
+                <Card className={`flex-1 bg-blue-50 ${userFilter === 'active' ? 'border-2 border-blue-600' : ''}`}>
+                  <View className="items-center py-2">
+                    <Text className="text-2xl font-bold text-gray-900">{users.filter((u) => u.active).length}</Text>
+                    <Text className="text-xs text-gray-600">{t('users_active_users')}</Text>
+                  </View>
+                </Card>
+              </Pressable>
+              <Pressable onPress={() => setUserFilter('inactive')} className="flex-1">
+                <Card className={`flex-1 bg-gray-100 ${userFilter === 'inactive' ? 'border-2 border-gray-600' : ''}`}>
+                  <View className="items-center py-2">
+                    <Text className="text-2xl font-bold text-gray-900">{users.filter((u) => !u.active).length}</Text>
+                    <Text className="text-xs text-gray-600">{t('users_inactive_users')}</Text>
+                  </View>
+                </Card>
+              </Pressable>
+              <Pressable onPress={() => setUserFilter('all')} className="flex-1">
+                <Card className={`flex-1 bg-purple-50 ${userFilter === 'all' ? 'border-2 border-purple-600' : ''}`}>
+                  <View className="items-center py-2">
+                    <Text className="text-2xl font-bold text-gray-900">{users.length}</Text>
+                    <Text className="text-xs text-gray-600">{t('users_total_users')}</Text>
+                  </View>
+                </Card>
+              </Pressable>
             </View>
 
             <View className="mb-4">
@@ -418,11 +445,13 @@ export function UsersScreen() {
         )}
       </ScrollView>
 
-      {/* Create user modal – internal email only */}
+      {/* Create user modal – keyboard does not close */}
       <Modal visible={createModalVisible} transparent animationType="slide">
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-2xl p-6 max-h-[85%]">
-            <ScrollView>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={modalStyles.overlay}>
+            <Pressable style={modalStyles.sheet} onPress={(e) => e.stopPropagation()}>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ maxHeight: '100%' }}>
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text className="text-lg font-bold mb-4">{t('users_create_user')}</Text>
               <View className="flex-row items-center mb-1">
                 <Text className="text-sm text-gray-600">{t('users_name_required')}</Text>
@@ -487,17 +516,19 @@ export function UsersScreen() {
                   ))}
                 </View>
               </ScrollView>
-            </ScrollView>
-            <View className="flex-row gap-3 mt-2">
-              <TouchableOpacity onPress={() => setCreateModalVisible(false)} disabled={creating} className="flex-1 py-3 rounded-lg bg-gray-200 items-center">
-                <Text className="font-semibold text-gray-700">{t('common_cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleCreateUser} disabled={creating || !generatedEmail} className="flex-1 py-3 rounded-lg bg-blue-600 items-center">
-                <Text className="font-semibold text-white">{creating ? t('users_creating') : t('users_create')}</Text>
-              </TouchableOpacity>
-            </View>
+                </ScrollView>
+                <View style={modalStyles.footer}>
+                  <TouchableOpacity onPress={() => setCreateModalVisible(false)} disabled={creating} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+                    <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleCreateUser} disabled={creating || !generatedEmail} style={[modalStyles.btn, { backgroundColor: '#2563eb' }]}>
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{creating ? t('users_creating') : t('users_create')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </Pressable>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {/* Credentials modal – Copy & WhatsApp (after create or reset) */}

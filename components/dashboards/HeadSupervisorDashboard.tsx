@@ -8,7 +8,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import { colors, layout } from '@/theme/tokens';
-import { Building2, DollarSign, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck, UserPlus } from 'lucide-react-native';
+import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck, UserPlus } from 'lucide-react-native';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { DriverAllocationScreen } from '@/components/screens/DriverAllocationScreen';
 
@@ -29,7 +29,7 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
 
   const stats = [
     { icon: <Building2 size={24} color="#3B82F6" />, label: t('dashboard_active_sites'), value: activeSites.toString(), bg: 'bg-blue-50' },
-    { icon: <DollarSign size={24} color="#10B981" />, label: t('dashboard_total_investment'), value: formatAmount(totalBudget, true), bg: 'bg-green-50' },
+    { icon: <Banknote size={24} color="#10B981" />, label: t('dashboard_total_investment'), value: formatAmount(totalBudget, true), bg: 'bg-green-50' },
     { icon: <MapPin size={24} color="#8B5CF6" />, label: t('dashboard_spent'), value: formatAmount(totalSpent, true), bg: 'bg-purple-50' },
     { icon: <TrendingUp size={24} color="#059669" />, label: t('dashboard_profit'), value: formatAmount(profit, true), bg: profit >= 0 ? 'bg-emerald-50' : 'bg-red-50' },
   ];

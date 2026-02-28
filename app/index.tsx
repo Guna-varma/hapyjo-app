@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { MockAppStoreProvider } from '@/context/MockAppStoreContext';
+import { ToastProvider } from '@/context/ToastContext';
 import { LocaleProvider , useLocale } from '@/context/LocaleContext';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { AppNavigation } from '@/components/navigation/AppNavigation';
@@ -34,9 +35,11 @@ export default function HomeScreen() {
     <AuthProvider>
       <LocaleProvider>
         <MockAppStoreProvider>
-          <View className="flex-1">
-            <AppContent />
-          </View>
+          <ToastProvider>
+            <View className="flex-1">
+              <AppContent />
+            </View>
+          </ToastProvider>
         </MockAppStoreProvider>
       </LocaleProvider>
     </AuthProvider>

@@ -7,7 +7,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { colors, layout } from '@/theme/tokens';
 import { formatAmount } from '@/lib/currency';
-import { DollarSign, FileText, Lock, TrendingUp } from 'lucide-react-native';
+import { Banknote, FileText, Lock, TrendingUp } from 'lucide-react-native';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 
 const BREAKPOINT_SMALL = 400;
@@ -28,11 +28,11 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
   const cardContainerStyle = isSmall ? styles.cardColumn : styles.cardRow;
 
   const metricCards = [
-    { icon: <DollarSign size={24} color="#10B981" />, label: t('dashboard_total_budget'), value: formatAmount(totalBudget, true) },
-    { icon: <DollarSign size={24} color="#8B5CF6" />, label: t('dashboard_total_spent'), value: formatAmount(totalSpent, true) },
-    { icon: <DollarSign size={24} color="#059669" />, label: t('dashboard_remaining'), value: formatAmount(remaining, true) },
+    { icon: <Banknote size={24} color="#10B981" />, label: t('dashboard_total_budget'), value: formatAmount(totalBudget, true) },
+    { icon: <Banknote size={24} color="#8B5CF6" />, label: t('dashboard_total_spent'), value: formatAmount(totalSpent, true) },
+    { icon: <Banknote size={24} color="#059669" />, label: t('dashboard_remaining'), value: formatAmount(remaining, true) },
     { icon: <TrendingUp size={24} color="#3B82F6" />, label: t('dashboard_revenue'), value: formatAmount(revenue, true) },
-    { icon: <DollarSign size={24} color="#DC2626" />, label: t('dashboard_profit'), value: formatAmount(profit, true), highlight: profit < 0 },
+    { icon: <Banknote size={24} color="#DC2626" />, label: t('dashboard_profit'), value: formatAmount(profit, true), highlight: profit < 0 },
   ];
 
   return (

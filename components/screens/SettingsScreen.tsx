@@ -5,7 +5,6 @@ import { Header } from '@/components/ui/Header';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
-import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { getRoleDisplayLabel } from '@/lib/rbac';
 import { DriverProfileScreen } from '@/components/screens/DriverProfileScreen';
@@ -15,7 +14,6 @@ import { User, Bell, Globe, LogOut, Lock, Eye, EyeOff } from 'lucide-react-nativ
 export function SettingsScreen() {
   const { user, logout } = useAuth();
   const { t, locale, setLocale } = useLocale();
-  const { notifications, markNotificationRead, clearAllNotifications } = useMockAppStore();
   const theme = useResponsiveTheme();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
@@ -122,46 +120,10 @@ export function SettingsScreen() {
                 <Text className="text-base font-semibold text-gray-900">{t('settings_notifications')}</Text>
                 <Text className="text-xs text-gray-600">
                   {notificationsEnabled ? t('settings_enabled') : t('settings_disabled')}
-                  {notifications.length > 0 ? ` · ${notifications.filter((n) => !n.read).length} ${t('settings_unread')}` : ''}
                 </Text>
               </View>
             </TouchableOpacity>
           </Card>
-
-          {notifications.length > 0 && (
-            <Card className="mb-3">
-              <View className="flex-row justify-between items-center mb-2">
-                <Text className="text-sm font-bold text-gray-900">{t('settings_in_app_notifications')}</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    Alert.alert(
-                      t('settings_clear_notifications'),
-                      t('settings_clear_notifications_confirm'),
-                      [
-                        { text: t('common_cancel'), style: 'cancel' },
-                        { text: t('common_confirm'), style: 'destructive', onPress: () => clearAllNotifications() },
-                      ]
-                    );
-                  }}
-                  className="bg-red-50 px-3 py-1.5 rounded-lg"
-                >
-                  <Text className="text-sm font-semibold text-red-700">{t('settings_clear_notifications')}</Text>
-                </TouchableOpacity>
-              </View>
-              <View className="max-h-48">
-                {notifications.slice(0, 10).map((n) => (
-                  <TouchableOpacity
-                    key={n.id}
-                    onPress={() => markNotificationRead(n.id)}
-                    className={`py-2 border-b border-gray-100 ${n.read ? 'opacity-70' : ''}`}
-                  >
-                    <Text className="text-sm font-medium text-gray-900">{n.linkType === 'issue' ? t('notification_new_issue') : n.title}</Text>
-                    <Text className="text-xs text-gray-600 mt-0.5" numberOfLines={2}>{n.body}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </Card>
-          )}
 
           <Card className="mb-3">
             <TouchableOpacity

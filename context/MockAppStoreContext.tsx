@@ -116,6 +116,8 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   resetUserPassword: (userId: string) => Promise<{ email: string | undefined; temporary_password: string }>;
   updateUser: (id: string, patch: Partial<User>) => Promise<void>;
   refetch: () => Promise<void>;
+  /** Import website-only vehicles (Umugwaneza) into the app. Returns count synced. */
+  syncFromWebsiteVehicles: () => Promise<{ syncedCount: number }>;
   addSite: (site: Site) => Promise<void>;
   setDriverVehicleAssignment: (siteId: string, driverId: string, vehicleIds: string[]) => Promise<void>;
   updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
@@ -343,10 +345,25 @@ function useSupabaseStore(): MockAppStoreContextValue {
     await refetch();
   }, [refetch]);
 
+  const syncFromWebsiteVehicles = useCallback(async (): Promise<{ syncedCount: number }> => {
+    const { data, error } = await supabase.rpc('sync_website_vehicles_to_app');
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    const syncedCount = row?.synced_count ?? 0;
+    await refetch();
+    return { syncedCount };
+  }, [refetch]);
+
   const addVehicle = useCallback(async (vehicle: Vehicle) => {
     const row = vehicleToRow(vehicle);
     const { error } = await supabase.from('vehicles').insert(row);
-    if (error) throw error;
+    if (error) {
+      const msg = error.message || '';
+      if (/stack depth|recursion|limit exceeded/i.test(msg)) {
+        throw new Error('Unable to save vehicle right now. Please try again.');
+      }
+      throw error;
+    }
     await refetch();
   }, [refetch]);
 
@@ -354,7 +371,13 @@ function useSupabaseStore(): MockAppStoreContextValue {
     const row = vehicleToRow(patch);
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from('vehicles').update(row).eq('id', id);
-    if (error) throw error;
+    if (error) {
+      const msg = error.message || '';
+      if (/stack depth|recursion|limit exceeded/i.test(msg)) {
+        throw new Error('Unable to save vehicle right now. Please try again.');
+      }
+      throw error;
+    }
     await refetch();
   }, [refetch]);
 
@@ -603,6 +626,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       resetUserPassword,
       updateUser,
       refetch,
+      syncFromWebsiteVehicles,
       addSite,
       setDriverVehicleAssignment,
       updateTask,
@@ -642,6 +666,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       resetUserPassword,
       updateUser,
       refetch,
+      syncFromWebsiteVehicles,
       addSite,
       setDriverVehicleAssignment,
       updateTask,

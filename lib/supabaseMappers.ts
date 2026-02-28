@@ -273,7 +273,7 @@ export function siteToRow(s: Partial<Site>): Record<string, unknown> {
 export function vehicleToRow(v: Partial<Vehicle>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (v.id != null) row.id = v.id;
-  if (v.siteId !== undefined) row.site_id = v.siteId || null;
+  row.site_id = (v.siteId != null && v.siteId !== '') ? v.siteId : null;
   if (v.type != null) row.type = v.type;
   if (v.vehicleNumberOrId != null) row.vehicle_number_or_id = v.vehicleNumberOrId;
   if (v.mileageKmPerLitre !== undefined) row.mileage_km_per_litre = v.mileageKmPerLitre;

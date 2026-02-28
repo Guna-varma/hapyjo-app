@@ -20,7 +20,7 @@ import { generateId } from '@/lib/id';
 import {
   FileText,
   TrendingUp,
-  DollarSign,
+  Banknote,
   BarChart3,
   Download,
   Lock,
@@ -107,6 +107,27 @@ function buildDetailedReportCSV(
     rows.push('');
   }
 
+  if (report.type === 'site_performance') {
+    rows.push([csvEscape('Section'), csvEscape('Metric'), csvEscape('Value'), csvEscape('Unit')].join(','));
+    rows.push([csvEscape('Summary'), csvEscape('Active Sites'), csvEscape(String(d.activeSites ?? '')), csvEscape('count')].join(','));
+    rows.push('');
+    const sitesSummary = (d.sitesSummary as { siteName: string; budget: number; spent: number; remaining: number; utilizationPct: number }[]) ?? [];
+    if (sitesSummary.length > 0) {
+      rows.push([csvEscape('Sites Performance'), csvEscape('Site Name'), csvEscape('Budget (RWF)'), csvEscape('Spent (RWF)'), csvEscape('Remaining (RWF)'), csvEscape('Utilization %')].join(','));
+      sitesSummary.forEach((site) => {
+        rows.push([
+          csvEscape('Sites Performance'),
+          csvEscape(site.siteName ?? ''),
+          csvEscape(formatAmountFn(site.budget ?? 0)),
+          csvEscape(formatAmountFn(site.spent ?? 0)),
+          csvEscape(formatAmountFn(site.remaining ?? 0)),
+          csvEscape(String(site.utilizationPct ?? 0)),
+        ].join(','));
+      });
+      rows.push('');
+    }
+  }
+
   // If we have other data keys not yet printed, add a "Raw data" section so nothing is lost
   const knownKeys = new Set(['periodStart', 'periodEnd', 'generatedAt', 'totalBudget', 'totalSpent', 'remainingBudget', 'revenue', 'expenses', 'fuel_cost', 'profit', 'trips', 'machine_hours', 'expenseCount', 'sitesSummary', 'activeSites', 'completedTasks', 'inProgressTasks', 'pendingTasks']);
   const extra = Object.entries(d).filter(([k]) => !knownKeys.has(k) && d[k] != null && typeof d[k] !== 'object');
@@ -165,7 +186,7 @@ export function ReportsScreen() {
 
   const reportTypes: { id: 'all' | 'financial' | 'operations' | 'site_performance'; labelKey: string; Icon: React.ComponentType<{ size: number; color: string }> }[] = [
     { id: 'all', labelKey: 'reports_all', Icon: FileText },
-    { id: 'financial', labelKey: 'reports_financial', Icon: DollarSign },
+    { id: 'financial', labelKey: 'reports_financial', Icon: Banknote },
     { id: 'operations', labelKey: 'reports_operations', Icon: BarChart3 },
     { id: 'site_performance', labelKey: 'reports_site_perf', Icon: TrendingUp },
   ];
@@ -346,6 +367,23 @@ export function ReportsScreen() {
         period,
         data: reportData,
       });
+      const existingSitePerf = reports.find((r) => r.period === period && r.type === 'site_performance');
+      if (!existingSitePerf) {
+        await addReport({
+          id: generateId('r'),
+          title: `Site Performance ${period}`,
+          type: 'site_performance',
+          generatedDate: end,
+          period,
+          data: {
+            periodStart: start,
+            periodEnd: end,
+            activeSites: sites.filter((s) => s.status === 'active').length,
+            sitesSummary,
+            generatedAt: now.toISOString(),
+          },
+        });
+      }
       Alert.alert(t('reports_generated'), t('reports_generated_message'));
     } catch (e) {
       Alert.alert(t('alert_error'), e instanceof Error ? e.message : t('reports_generate_failed'));
@@ -689,7 +727,7 @@ export function ReportsScreen() {
               <Card key={report.id} style={reportCardStyles.card}>
                 <View style={reportCardStyles.cardHeader}>
                   <View style={reportCardStyles.titleRow}>
-                    {report.type === 'financial' && <DollarSign size={18} color="#059669" />}
+                    {report.type === 'financial' && <Banknote size={18} color="#059669" />}
                     {report.type === 'operations' && <BarChart3 size={18} color="#6366f1" />}
                     {report.type === 'site_performance' && <TrendingUp size={18} color="#2563eb" />}
                     {report.type !== 'financial' && report.type !== 'operations' && report.type !== 'site_performance' && <FileText size={18} color="#64748b" />}

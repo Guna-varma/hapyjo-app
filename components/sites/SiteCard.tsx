@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Badge } from '@/components/ui/Badge';
 import { formatAmount } from '@/lib/currency';
-import { MapPin, DollarSign, TrendingUp } from 'lucide-react-native';
+import { MapPin, Banknote, TrendingUp } from 'lucide-react-native';
 import { Site } from '@/types';
 import { useLocale } from '@/context/LocaleContext';
 
@@ -49,7 +49,7 @@ export function SiteCard({ site, onPress }: SiteCardProps) {
           <View className="flex-1 mr-2">
             <Text className="text-xs text-gray-600 mb-1">{t('site_card_budget')}</Text>
             <View className="flex-row items-center">
-              <DollarSign size={14} color="#3B82F6" />
+              <Banknote size={14} color="#2563eb" />
               <Text className="text-sm font-semibold text-slate-900 ml-1">
                 {formatAmount(site.budget, true)}
               </Text>

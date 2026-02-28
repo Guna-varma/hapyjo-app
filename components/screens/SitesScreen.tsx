@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, Modal, TextInput, Pressable, Keyboard } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Modal, TextInput, Pressable, Keyboard, RefreshControl } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { SiteCard } from '@/components/sites/SiteCard';
 import { SiteDetailScreen } from '@/components/screens/SiteDetailScreen';
+import { modalStyles } from '@/components/ui/modalStyles';
+import { SkeletonList } from '@/components/ui/SkeletonLoader';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
+import { colors } from '@/theme/tokens';
 import { generateId } from '@/lib/id';
 import { Plus } from 'lucide-react-native';
 
@@ -15,9 +19,11 @@ export function SitesScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, updateSite, addSite, loading } = useMockAppStore();
+  const { sites, updateSite, addSite, refetch, loading } = useMockAppStore();
+  const { showToast } = useToast();
   const isHeadSupervisor = user?.role === 'head_supervisor';
   const [budgetModalVisible, setBudgetModalVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [allocateSiteId, setAllocateSiteId] = useState<string | null>(null);
   const [amountRwf, setAmountRwf] = useState('');
   const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
@@ -41,6 +47,7 @@ export function SitesScreen() {
     try {
       await updateSite(allocateSiteId, { budget: amount });
       setBudgetModalVisible(false);
+      showToast(t('sites_toast_budget_updated'));
     } catch {
       Alert.alert(t('sites_error_title'), t('sites_budget_update_failed'));
     }
@@ -76,8 +83,18 @@ export function SitesScreen() {
         progress: 0,
       });
       setCreateSiteModalVisible(false);
+      showToast(t('sites_toast_site_created'));
     } catch {
       Alert.alert(t('sites_error_title'), t('sites_create_failed'));
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -108,14 +125,15 @@ export function SitesScreen() {
       />
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding }}
+        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={() => Keyboard.dismiss()}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
+        }
       >
         {loading ? (
-          <Card className="py-8">
-            <Text className="text-center text-gray-600">{t('sites_loading')}</Text>
-          </Card>
+          <SkeletonList count={5} />
         ) : (
           <>
         {user?.role === 'head_supervisor' && (
@@ -142,85 +160,81 @@ export function SitesScreen() {
       </ScrollView>
 
       <Modal visible={createSiteModalVisible} transparent animationType="slide">
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-2xl p-6">
-            <Text className="text-lg font-bold mb-4">{t('sites_create_site_modal_title')}</Text>
-            <Text className="text-sm text-gray-600 mb-1">{t('sites_site_name')}</Text>
+        <Pressable style={modalStyles.overlay} onPress={() => setCreateSiteModalVisible(false)}>
+          <Pressable style={modalStyles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={modalStyles.title}>{t('sites_create_site_modal_title')}</Text>
+            <Text style={modalStyles.label}>{t('sites_site_name')}</Text>
             <TextInput
               value={newSiteName}
               onChangeText={setNewSiteName}
               placeholder={t('sites_name_placeholder')}
-              className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
+              placeholderTextColor={colors.placeholder}
+              style={[modalStyles.input, { marginBottom: 12 }]}
             />
-            <Text className="text-sm text-gray-600 mb-1">{t('sites_location')}</Text>
+            <Text style={modalStyles.label}>{t('sites_location')}</Text>
             <TextInput
               value={newSiteLocation}
               onChangeText={setNewSiteLocation}
               placeholder={t('sites_location_placeholder')}
-              className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
+              placeholderTextColor={colors.placeholder}
+              style={[modalStyles.input, { marginBottom: 12 }]}
             />
-            <Text className="text-sm text-gray-600 mb-1">{t('sites_initial_budget_optional')}</Text>
+            <Text style={modalStyles.label}>{t('sites_initial_budget_optional')}</Text>
             <TextInput
               value={newSiteBudget}
               onChangeText={setNewSiteBudget}
               placeholder={t('sites_budget_placeholder')}
               keyboardType="number-pad"
-              className="border border-gray-300 rounded-lg px-3 py-2 mb-4 bg-white"
+              placeholderTextColor={colors.placeholder}
+              style={[modalStyles.input, { marginBottom: 16 }]}
             />
-            <View className="flex-row gap-3">
-              <TouchableOpacity onPress={() => setCreateSiteModalVisible(false)} className="flex-1 py-3 rounded-lg bg-gray-200 items-center">
-                <Text className="font-semibold text-gray-700">{t('general_cancel')}</Text>
+            <View style={modalStyles.footer}>
+              <TouchableOpacity onPress={() => setCreateSiteModalVisible(false)} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+                <Text style={modalStyles.btnTextSecondary}>{t('general_cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleConfirmCreateSite} className="flex-1 py-3 rounded-lg bg-blue-600 items-center">
-                <Text className="font-semibold text-white">{t('sites_add_site')}</Text>
+              <TouchableOpacity onPress={handleConfirmCreateSite} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('sites_add_site')}</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <Modal visible={budgetModalVisible} transparent animationType="slide">
-        <View className="flex-1 justify-center bg-black/50 px-4">
-          <View className="bg-white rounded-2xl p-6">
-            <Text className="text-lg font-bold mb-4">{t('sites_allocate_budget_modal_title')}</Text>
-            <Text className="text-sm text-gray-600 mb-2">{t('sites_select_site')}</Text>
-            <View className="flex-row flex-wrap gap-2 mb-4">
+        <Pressable style={[modalStyles.overlayCenter]} onPress={() => setBudgetModalVisible(false)}>
+          <Pressable style={modalStyles.sheetCenter} onPress={(e) => e.stopPropagation()}>
+            <Text style={modalStyles.title}>{t('sites_allocate_budget_modal_title')}</Text>
+            <Text style={modalStyles.label}>{t('sites_select_site')}</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
               {sites.map((s) => (
                 <Pressable
                   key={s.id}
                   onPress={() => setAllocateSiteId(s.id)}
-                  className={`px-3 py-2 rounded-lg ${allocateSiteId === s.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: allocateSiteId === s.id ? colors.primary : colors.gray200 }}
                 >
-                  <Text className={allocateSiteId === s.id ? 'text-white font-medium' : 'text-gray-700'}>
-                    {s.name}
-                  </Text>
+                  <Text style={{ color: allocateSiteId === s.id ? '#fff' : colors.text, fontWeight: '500' }}>{s.name}</Text>
                 </Pressable>
               ))}
             </View>
-            <Text className="text-sm text-gray-600 mb-1">{t('sites_amount_rwf')}</Text>
+            <Text style={modalStyles.label}>{t('sites_amount_rwf')}</Text>
             <TextInput
               value={amountRwf}
               onChangeText={setAmountRwf}
               placeholder={t('sites_budget_placeholder')}
               keyboardType="number-pad"
-              className="border border-gray-300 rounded-lg px-3 py-2 mb-4 bg-white"
+              placeholderTextColor={colors.placeholder}
+              style={[modalStyles.input, { marginBottom: 16 }]}
             />
-            <View className="flex-row gap-3">
-              <TouchableOpacity
-                onPress={() => setBudgetModalVisible(false)}
-                className="flex-1 py-3 rounded-lg bg-gray-200 items-center"
-              >
-                <Text className="font-semibold text-gray-700">{t('general_cancel')}</Text>
+            <View style={modalStyles.footer}>
+              <TouchableOpacity onPress={() => setBudgetModalVisible(false)} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+                <Text style={modalStyles.btnTextSecondary}>{t('general_cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleConfirmBudget}
-                className="flex-1 py-3 rounded-lg bg-blue-600 items-center"
-              >
-                <Text className="font-semibold text-white">{t('common_confirm')}</Text>
+              <TouchableOpacity onPress={handleConfirmBudget} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_confirm')}</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );

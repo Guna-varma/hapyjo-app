@@ -8,17 +8,26 @@ import {
   TextInput,
   Pressable,
   Alert,
-  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
+  RefreshControl,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
+import { modalStyles } from '@/components/ui/modalStyles';
+import { SkeletonList } from '@/components/ui/SkeletonLoader';
 import { useLocale } from '@/context/LocaleContext';
 import { useAuth } from '@/context/AuthContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
+import { colors } from '@/theme/tokens';
 import { generateId } from '@/lib/id';
 import type { Vehicle as VehicleType, VehicleType as VType, VehicleStatus } from '@/types';
-import { Truck, Cog, Pencil, CheckCircle, Circle } from 'lucide-react-native';
+import { Truck, Cog, Pencil, CheckCircle, Circle, Download } from 'lucide-react-native';
 
 type FilterType = 'all' | 'truck' | 'machine';
 type StatusFilter = 'active' | 'all';
@@ -35,8 +44,13 @@ export function VehiclesScreen() {
     driverVehicleAssignments,
     addVehicle,
     updateVehicle,
+    refetch,
+    syncFromWebsiteVehicles,
     loading,
   } = useMockAppStore();
+  const { showToast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncingFromWebsite, setSyncingFromWebsite] = useState(false);
 
   const [filter, setFilter] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
@@ -170,9 +184,40 @@ export function VehiclesScreen() {
           status: 'active',
         });
       }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAddModalVisible(false);
-    } catch {
-      Alert.alert(t('alert_error'), t('vehicles_add_failed'));
+      showToast(addType === 'truck' ? t('vehicles_toast_added_truck') : t('vehicles_toast_added_machine'));
+    } catch (e) {
+      const message = (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) || t('vehicles_add_failed');
+      Alert.alert(t('alert_error'), message);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const onSyncFromWebsite = async () => {
+    if (syncingFromWebsite) return;
+    setSyncingFromWebsite(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const { syncedCount } = await syncFromWebsiteVehicles();
+      if (syncedCount === 0) {
+        showToast(t('vehicles_sync_toast_none'));
+      } else {
+        showToast(t('vehicles_sync_toast_count').replace('{{count}}', String(syncedCount)));
+      }
+    } catch (e) {
+      const message = (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) || t('vehicles_sync_failed');
+      showToast(message);
+    } finally {
+      setSyncingFromWebsite(false);
     }
   };
 
@@ -206,9 +251,12 @@ export function VehiclesScreen() {
         if (!isNaN(lh) && lh > 0) patch.hoursPerLitre = 1 / lh;
       }
       await updateVehicle(editVehicle.id, patch);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeEdit();
-    } catch {
-      Alert.alert(t('alert_error'), t('vehicles_edit_failed'));
+      showToast(t('vehicles_toast_saved'));
+    } catch (e) {
+      const message = (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) || t('vehicles_edit_failed');
+      Alert.alert(t('alert_error'), message);
     }
   };
 
@@ -276,14 +324,29 @@ export function VehiclesScreen() {
             </Text>
           </Pressable>
         </View>
+        {canAdd && (
+          <TouchableOpacity
+            onPress={onSyncFromWebsite}
+            disabled={syncingFromWebsite}
+            className="flex-row items-center justify-center gap-2 py-2 mt-2 rounded-lg border border-slate-300 bg-slate-50"
+          >
+            <Download size={16} color="#475569" />
+            <Text className="text-sm font-medium text-slate-600">
+              {syncingFromWebsite ? t('common_loading') : t('vehicles_sync_from_website')}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
+        }
+      >
         {loading ? (
-          <View className="py-12 items-center">
-            <ActivityIndicator size="large" color="#2563eb" />
-            <Text className="text-gray-600 mt-3">{t('vehicles_loading')}</Text>
-          </View>
+          <SkeletonList count={6} />
         ) : (
           <>
             {Object.entries(bySite).map(([sid, list]) => (
@@ -317,13 +380,13 @@ export function VehiclesScreen() {
                               Tank: {v.tankCapacityLitre} L · {t('vehicles_fuel_balance_label')}: {v.fuelBalanceLitre} L
                             </Text>
                             {v.type === 'truck' && v.mileageKmPerLitre != null && (
-                              <Text className="text-xs text-gray-500">{v.mileageKmPerLitre} km/L</Text>
+                              <Text className="text-xs text-gray-500">{Number(v.mileageKmPerLitre).toFixed(2)} km/L</Text>
                             )}
                             {v.type === 'truck' && v.capacityTons != null && (
-                              <Text className="text-xs text-gray-500">{v.capacityTons} t</Text>
+                              <Text className="text-xs text-gray-500">{Number(v.capacityTons).toFixed(1)} t</Text>
                             )}
                             {v.type === 'machine' && v.hoursPerLitre != null && v.hoursPerLitre > 0 && (
-                              <Text className="text-xs text-gray-500">{1 / v.hoursPerLitre} L/h</Text>
+                              <Text className="text-xs text-gray-500">{((1 / v.hoursPerLitre)).toFixed(2)} L/h</Text>
                             )}
                           </View>
                         </View>
@@ -353,42 +416,43 @@ export function VehiclesScreen() {
         )}
       </ScrollView>
 
-      {/* Add vehicle modal */}
+      {/* Add vehicle modal – unified style, keyboard does not close */}
       <Modal visible={addModalVisible} transparent animationType="slide">
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-2xl p-6 max-h-[80%]">
-            <Text className="text-lg font-bold mb-4">
-              {addType === 'truck' ? t('vehicles_add_truck') : t('vehicles_add_machine')}
-            </Text>
-            <ScrollView>
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_site_label')} ({t('vehicles_site_optional')})</Text>
-              <View className="flex-row flex-wrap gap-2 mb-3">
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={modalStyles.overlay}>
+            <Pressable style={modalStyles.sheet} onPress={(e) => e.stopPropagation()}>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ maxHeight: '100%' }}>
+                <Text style={modalStyles.title}>
+                  {addType === 'truck' ? t('vehicles_add_truck') : t('vehicles_add_machine')}
+                </Text>
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+              <Text style={modalStyles.label}>{t('vehicles_site_label')} ({t('vehicles_site_optional')})</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12, paddingRight: 4 }}>
                 <Pressable
-                  onPress={() => setSiteId(FREE_SITE_KEY)}
-                  className={`px-3 py-2 rounded-lg ${siteId === FREE_SITE_KEY ? 'bg-blue-600' : 'bg-gray-200'}`}
+                  onPress={() => { Haptics.selectionAsync(); setSiteId(FREE_SITE_KEY); }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === FREE_SITE_KEY ? colors.primary : colors.gray200 }}
                 >
-                  <Text className={siteId === FREE_SITE_KEY ? 'text-white font-medium' : 'text-gray-700'}>
-                    {t('vehicles_free_no_site')}
-                  </Text>
+                  <Text style={{ color: siteId === FREE_SITE_KEY ? '#fff' : colors.text, fontWeight: '500' }}>{t('vehicles_free_no_site')}</Text>
                 </Pressable>
                 {sites.map((s) => (
                   <Pressable
                     key={s.id}
-                    onPress={() => setSiteId(s.id)}
-                    className={`px-3 py-2 rounded-lg ${siteId === s.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    onPress={() => { Haptics.selectionAsync(); setSiteId(s.id); }}
+                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === s.id ? colors.primary : colors.gray200 }}
                   >
-                    <Text className={siteId === s.id ? 'text-white font-medium' : 'text-gray-700'}>
-                      {s.name}
-                    </Text>
+                    <Text style={{ color: siteId === s.id ? '#fff' : colors.text, fontWeight: '500' }} numberOfLines={1}>{s.name}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_vehicle_number_id')}</Text>
+              <Text style={modalStyles.label}>{t('vehicles_vehicle_number_id')}</Text>
               <TextInput
                 value={vehicleNumber}
                 onChangeText={setVehicleNumber}
                 placeholder={t('vehicles_number_placeholder')}
-                className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
+                placeholderTextColor={colors.placeholder}
+                keyboardType="default"
+                autoCapitalize="characters"
+                style={[modalStyles.input, { marginBottom: 12 }]}
               />
               {addType === 'truck' ? (
                 <>
@@ -442,59 +506,56 @@ export function VehiclesScreen() {
                 keyboardType="decimal-pad"
                 className="border border-gray-300 rounded-lg px-3 py-2 mb-4 bg-white"
               />
-            </ScrollView>
-            <View className="flex-row gap-3 mt-2">
-              <TouchableOpacity
-                onPress={() => setAddModalVisible(false)}
-                className="flex-1 py-3 rounded-lg bg-gray-200 items-center"
-              >
-                <Text className="font-semibold text-gray-700">{t('common_cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={submitAdd}
-                className="flex-1 py-3 rounded-lg bg-blue-600 items-center"
-              >
-                <Text className="font-semibold text-white">{t('common_add')}</Text>
-              </TouchableOpacity>
-            </View>
+                </ScrollView>
+                <View style={modalStyles.footer}>
+                  <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setAddModalVisible(false); }} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+                    <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={submitAdd} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_add')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </Pressable>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
-      {/* Edit vehicle modal – litres, tank, mileage/hours, status (active/inactive). No hard delete. */}
+      {/* Edit vehicle modal – unified style */}
       <Modal visible={!!editVehicle} transparent animationType="slide">
-        <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-2xl p-6 max-h-[85%]">
-            <Text className="text-lg font-bold mb-4">{t('vehicles_edit_title')}</Text>
-            <ScrollView>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={modalStyles.overlay}>
+            <Pressable style={modalStyles.sheet} onPress={(e) => e.stopPropagation()}>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ maxHeight: '100%' }}>
+                <Text style={modalStyles.title}>{t('vehicles_edit_title')}</Text>
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
               <Text className="text-sm text-gray-600 mb-1">{t('vehicles_site_label')} ({t('vehicles_site_optional')})</Text>
-              <View className="flex-row flex-wrap gap-2 mb-3">
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12, paddingRight: 4 }}>
                 <Pressable
-                  onPress={() => setSiteId(FREE_SITE_KEY)}
-                  className={`px-3 py-2 rounded-lg ${siteId === FREE_SITE_KEY ? 'bg-blue-600' : 'bg-gray-200'}`}
+                  onPress={() => { Haptics.selectionAsync(); setSiteId(FREE_SITE_KEY); }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === FREE_SITE_KEY ? colors.primary : colors.gray200 }}
                 >
-                  <Text className={siteId === FREE_SITE_KEY ? 'text-white font-medium' : 'text-gray-700'}>
-                    {t('vehicles_free_no_site')}
-                  </Text>
+                  <Text style={{ color: siteId === FREE_SITE_KEY ? '#fff' : colors.text, fontWeight: '500' }}>{t('vehicles_free_no_site')}</Text>
                 </Pressable>
                 {sites.map((s) => (
                   <Pressable
                     key={s.id}
-                    onPress={() => setSiteId(s.id)}
-                    className={`px-3 py-2 rounded-lg ${siteId === s.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    onPress={() => { Haptics.selectionAsync(); setSiteId(s.id); }}
+                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === s.id ? colors.primary : colors.gray200 }}
                   >
-                    <Text className={siteId === s.id ? 'text-white font-medium' : 'text-gray-700'}>
-                      {s.name}
-                    </Text>
+                    <Text style={{ color: siteId === s.id ? '#fff' : colors.text, fontWeight: '500' }} numberOfLines={1}>{s.name}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_vehicle_number_id')}</Text>
+              <Text style={modalStyles.label}>{t('vehicles_vehicle_number_id')}</Text>
               <TextInput
                 value={vehicleNumber}
                 onChangeText={setVehicleNumber}
                 placeholder={t('vehicles_number_placeholder')}
-                className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
+                placeholderTextColor={colors.placeholder}
+                keyboardType="default"
+                autoCapitalize="characters"
+                style={[modalStyles.input, { marginBottom: 12 }]}
               />
               {addType === 'truck' ? (
                 <>
@@ -585,23 +646,19 @@ export function VehiclesScreen() {
                   </Text>
                 </Pressable>
               </View>
-            </ScrollView>
-            <View className="flex-row gap-3 mt-2">
-              <TouchableOpacity
-                onPress={closeEdit}
-                className="flex-1 py-3 rounded-lg bg-gray-200 items-center"
-              >
-                <Text className="font-semibold text-gray-700">{t('common_cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={submitEdit}
-                className="flex-1 py-3 rounded-lg bg-blue-600 items-center"
-              >
-                <Text className="font-semibold text-white">{t('common_save')}</Text>
-              </TouchableOpacity>
-            </View>
+                </ScrollView>
+                <View style={modalStyles.footer}>
+                  <TouchableOpacity onPress={() => { Haptics.selectionAsync(); closeEdit(); }} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+                    <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={submitEdit} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_save')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </Pressable>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );

@@ -7,16 +7,18 @@ import {
   TextInput,
   Pressable,
   Image,
-  ActivityIndicator,
   Alert,
   Keyboard,
+  RefreshControl,
 } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { Badge } from '@/components/ui/Badge';
+import { SkeletonList } from '@/components/ui/SkeletonLoader';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { generateId } from '@/lib/id';
 import { AlertCircle, Plus, MapPin, Calendar } from 'lucide-react-native';
@@ -30,7 +32,9 @@ export function IssuesScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, issues, addIssue, loading } = useMockAppStore();
+  const { sites, issues, addIssue, refetch, loading } = useMockAppStore();
+  const { showToast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
   const canRaise = user?.role === 'driver_truck' || user?.role === 'driver_machine' || user?.role === 'assistant_supervisor';
   const canViewAll = user?.role === 'head_supervisor' || user?.role === 'owner';
   const thumbnailSize = theme.scaleMin(64);
@@ -49,6 +53,15 @@ export function IssuesScreen() {
 
   const getSiteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const statusVariant = { open: 'warning' as const, acknowledged: 'info' as const, resolved: 'success' as const };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const addImage = async () => {
     try {
@@ -81,7 +94,7 @@ export function IssuesScreen() {
       setRaiseModalVisible(false);
       setDescription('');
       setImageUris([]);
-      Alert.alert(t('issues_raise_success_title'), t('issues_raise_success_message'), [{ text: t('common_ok') }]);
+      showToast(t('issues_raise_success_message'));
     } finally {
       setSubmittingIssue(false);
     }
@@ -105,12 +118,13 @@ export function IssuesScreen() {
         }
       />
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
+      >
         {loading ? (
-          <View className="py-12 items-center">
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text className="text-gray-600 mt-3">{t('issues_loading')}</Text>
-          </View>
+          <SkeletonList count={5} />
         ) : (
           <>
         {canViewAll && sites.length > 1 && (
