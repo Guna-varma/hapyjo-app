@@ -65,7 +65,7 @@ export function DriverProfileScreen({ onBack }: { onBack?: () => void }) {
         }
       />
       <KeyboardAwareScrollView
-        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={() => Keyboard.dismiss()}
         showsVerticalScrollIndicator={false}

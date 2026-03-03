@@ -436,7 +436,7 @@ export function DriverTripsScreen() {
         subtitle={isSupervisorView ? (selectedDriverId ? targetDriverName : t('driver_select_driver')) : (user?.name ? `${t('driver_welcome')}, ${user.name}` : '')}
       />
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         {loading ? (
           <View className="py-12 items-center">
             <ActivityIndicator size="large" color="#2563eb" />

@@ -9,12 +9,13 @@ interface DashboardLayoutProps extends Omit<ScrollViewProps, 'contentContainerSt
 
 /**
  * Shared layout wrapper for all dashboards and forms.
- * Enforces: horizontal padding 16px, vertical card spacing 16px, 8px grid alignment.
+ * Responsive: horizontal padding, vertical spacing, extra bottom padding so content is not cut off on any device.
  */
 export function DashboardLayout({ children, scroll = true, ...scrollProps }: DashboardLayoutProps) {
   const contentStyle = {
     paddingHorizontal: layout.screenPaddingHorz,
-    paddingVertical: layout.cardSpacingVertical,
+    paddingTop: layout.cardSpacingVertical,
+    paddingBottom: layout.cardSpacingVertical * 2.5,
     flexGrow: 1,
   };
 

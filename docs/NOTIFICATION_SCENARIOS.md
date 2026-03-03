@@ -18,6 +18,7 @@ Target roles are chosen so everyone who needs to know gets the notification with
 |-------------|--------|--------------|-----------|
 | **issue_raised** | `addIssue` | admin, owner, head_supervisor, assistant_supervisor | issue |
 | **issue_resolved** | `updateIssue` (status → resolved or acknowledged) | admin, owner, head_supervisor, assistant_supervisor | issue |
+| **trip_started** | `addTrip` (status in_progress) or `updateTrip` (status → in_progress) | owner, head_supervisor, assistant_supervisor | trip |
 | **trip_completed** | `addTrip` (status completed) or `updateTrip` (status → completed) | owner, head_supervisor, assistant_supervisor, accountant | trip |
 | **expense_added** | `addExpense` | owner, head_supervisor, assistant_supervisor, accountant | expense |
 | **survey_submitted** | `addSurvey` | admin, owner, head_supervisor, assistant_supervisor | survey |
@@ -38,8 +39,8 @@ Target roles are chosen so everyone who needs to know gets the notification with
 1. **App** (e.g. Issues screen) calls a store method (`addIssue`, `addTrip`, …).
 2. **MockAppStoreContext** writes to the DB (issues, trips, …) then calls `buildNotificationRows(scenarioId, payload, generateId)`.
 3. One **notification row per target role** is inserted into `public.notifications` (same title/body/link for all; only `target_role` differs).
-4. **Supabase Realtime** pushes table changes to the app → bell and list update.
-5. **Database webhook** (if configured) calls **send-push-on-notification** Edge Function → **Expo Push** is sent to devices whose users have that role.
+4. **Supabase Realtime** pushes the INSERT to subscribed clients. The app shows a **system notification** immediately for the current user when `target_role` matches (no latency; premade title + real-time body, app icon in production).
+5. **Database webhook** (if configured) calls **send-push-on-notification** Edge Function → **Expo Push** is sent to all devices whose users have that role. All targeted users receive the notification (in-app list + system/push).
 
 ---
 

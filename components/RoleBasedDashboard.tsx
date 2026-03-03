@@ -11,8 +11,12 @@ import { SurveyorDashboard } from '@/components/dashboards/SurveyorDashboard';
 import { UserRole } from '@/types';
 import type { TabId } from '@/lib/rbac';
 
+export interface SurveyNavParams {
+  openNewSurvey?: boolean;
+}
+
 export interface DashboardNavProps {
-  onNavigateTab?: (tab: TabId) => void;
+  onNavigateTab?: (tab: TabId, params?: SurveyNavParams) => void;
 }
 
 const DASHBOARDS: Record<UserRole, React.ComponentType<DashboardNavProps>> = {

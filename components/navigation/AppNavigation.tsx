@@ -7,6 +7,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { getTabsForRole, type TabId } from '@/lib/rbac';
+import type { SurveyNavParams } from '@/components/RoleBasedDashboard';
 import { RoleBasedDashboard } from '@/components/RoleBasedDashboard';
 import { ReportsScreen } from '@/components/screens/ReportsScreen';
 import { SettingsScreen } from '@/components/screens/SettingsScreen';
@@ -69,9 +70,15 @@ export function AppNavigation() {
     () => (user ? getTabsForRole(user.role) : (['dashboard', 'settings'] as TabId[])),
     [user]
   );
-  const [activeTab, setActiveTab] = useState<TabId>(tabIds[0]);
+  const [activeTab, setActiveTabState] = useState<TabId>(tabIds[0]);
+  const [openNewSurveyModalOnce, setOpenNewSurveyModalOnce] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
+
+  const setActiveTab = useCallback((tab: TabId, params?: SurveyNavParams) => {
+    if (tab === 'surveys' && params?.openNewSurvey) setOpenNewSurveyModalOnce(true);
+    setActiveTabState(tab);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
@@ -93,9 +100,9 @@ export function AppNavigation() {
   const tabIdsKey = tabIds.join(',');
   useEffect(() => {
     if (!tabIds.includes(activeTab)) {
-      setActiveTab(tabIds[0]);
+      setActiveTabState(tabIds[0]);
     }
-  }, [tabIdsKey, activeTab, tabIds, setActiveTab]);
+  }, [tabIdsKey, activeTab, tabIds]);
 
   const visibleTabs = tabIds.map((id) => ({ id, ...TAB_CONFIG[id], label: t(TAB_CONFIG[id].labelKey) }));
 
@@ -120,7 +127,12 @@ export function AppNavigation() {
       case 'expenses':
         return <ExpensesScreen />;
       case 'surveys':
-        return <SurveysScreen />;
+        return (
+          <SurveysScreen
+            initialOpenNewSurveyModal={openNewSurveyModalOnce}
+            onClearOpenNewSurveyModal={() => setOpenNewSurveyModalOnce(false)}
+          />
+        );
       case 'issues':
         return <IssuesScreen />;
       case 'gps_camera':
@@ -136,9 +148,11 @@ export function AppNavigation() {
   const footerJustify = tabCount <= 3 ? 'center' : tabCount <= 5 ? 'space-evenly' : 'flex-start';
   const footerScrollable = tabCount >= 6;
 
+  const bottomTabPadding = Math.max(theme.tabPaddingV, insets.bottom || 0);
+
   return (
-    <SafeAreaView className="flex-1 bg-slate-50" edges={['left', 'right']}>
-      <View style={{ flex: 1, paddingTop: topInset }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }} edges={['left', 'right']}>
+      <View style={{ flex: 1, minHeight: 0, paddingTop: topInset }}>
         {/* Compact top bar: Refresh + Language – minimal height, no dead space */}
         <View
           style={{
@@ -187,13 +201,13 @@ export function AppNavigation() {
             <LanguageSwitcher />
           </View>
         </View>
-        <View key={locale} className="flex-1" style={{ minWidth: 0 }}>
+        <View key={locale} style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           {renderContent()}
         </View>
       </View>
 
-      {/* Bottom Tab Bar – minimal bottom padding; Android: fixed to avoid excess white space, iOS: safe area */}
-      <View style={{ backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: 'rgba(226,232,240,0.9)', paddingTop: theme.tabPaddingV, paddingBottom: Platform.OS === 'android' ? theme.tabPaddingV : Math.max(insets.bottom, theme.tabPaddingV), paddingHorizontal: theme.tabPaddingH }}>
+      {/* Bottom Tab Bar – responsive padding for all Android/iOS device sizes */}
+      <View style={{ backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: 'rgba(226,232,240,0.9)', paddingTop: theme.spacingSm, paddingBottom: bottomTabPadding, paddingHorizontal: theme.tabPaddingH }}>
         {footerScrollable ? (
           <ScrollView
             horizontal
@@ -202,6 +216,7 @@ export function AppNavigation() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 4,
+              paddingBottom: 0,
             }}
           >
             {visibleTabs.map((tab) => {

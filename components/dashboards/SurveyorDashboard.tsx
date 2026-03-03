@@ -1,22 +1,64 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import { DashboardLayout } from '@/components/ui/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
-import { MapPin, Calendar, Camera, Plus } from 'lucide-react-native';
+import { useToast } from '@/context/ToastContext';
+import { MapPin, Calendar, Plus, ImagePlus } from 'lucide-react-native';
 import { colors, layout } from '@/theme/tokens';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
+import { uploadToSupabase } from '@/features/gpsCamera/uploadToSupabase';
 
 export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { user } = useAuth();
   const { t } = useLocale();
-  const { surveys } = useMockAppStore();
+  const { showToast } = useToast();
+  const { surveys, updateSurvey } = useMockAppStore();
   const mySurveys = surveys.filter((survey) => survey.surveyorId === user?.id);
+  const [uploadingSurveyId, setUploadingSurveyId] = useState<string | null>(null);
+
+  const addPhotosToSurvey = useCallback(
+    async (surveyId: string) => {
+      const survey = mySurveys.find((s) => s.id === surveyId);
+      if (!survey) return;
+      setUploadingSurveyId(surveyId);
+      try {
+        const { launchImageLibraryAsync } = await import('expo-image-picker');
+        const result = await launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsMultipleSelection: true,
+          quality: 0.8,
+        });
+        if (result.canceled || !result.assets?.length) {
+          setUploadingSurveyId(null);
+          return;
+        }
+        const existing = survey.photos ?? [];
+        const urls: string[] = [];
+        for (const asset of result.assets) {
+          const uri = asset.uri;
+          if (uri) {
+            const url = await uploadToSupabase(uri);
+            urls.push(url);
+          }
+        }
+        if (urls.length > 0) {
+          await updateSurvey(surveyId, { photos: [...existing, ...urls] });
+          showToast(t('surveys_photos_added'));
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Upload failed';
+        Alert.alert('Error', msg);
+      } finally {
+        setUploadingSurveyId(null);
+      }
+    },
+    [mySurveys, updateSurvey, showToast, t]
+  );
 
   const statusVariant = {
     draft: 'default' as const,
@@ -30,7 +72,7 @@ export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
         title={t('dashboard_surveyor_title')}
         subtitle={user?.name ? `${t('dashboard_welcome_name')}, ${user.name}` : ''}
         rightAction={
-          <TouchableOpacity onPress={() => onNavigateTab?.('surveys')} style={surveyorStyles.headerBtn}>
+          <TouchableOpacity onPress={() => onNavigateTab?.('surveys', { openNewSurvey: true })} style={surveyorStyles.headerBtn}>
             <Plus size={18} color="#ffffff" />
             <Text style={surveyorStyles.headerBtnText}>{t('surveys_new_button')}</Text>
           </TouchableOpacity>
@@ -104,15 +146,24 @@ export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
                 </View>
               )}
 
-              <View className="flex-row justify-between pt-3 border-t border-gray-200">
-                <View className="flex-row items-center">
-                  <Camera size={14} color="#6B7280" />
+              <View className="flex-row justify-between items-center pt-3 border-t border-gray-200">
+                <TouchableOpacity
+                  onPress={() => addPhotosToSurvey(survey.id)}
+                  disabled={uploadingSurveyId === survey.id}
+                  className="flex-row items-center"
+                >
+                  {uploadingSurveyId === survey.id ? (
+                    <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 6 }} />
+                  ) : (
+                    <ImagePlus size={16} color="#2563eb" />
+                  )}
                   <Text className="text-xs text-gray-600 ml-1">
                     {survey.photos?.length || 0} {t('common_photos')}
                   </Text>
-                </View>
+                  <Text className="text-xs text-blue-600 font-medium ml-2">{t('surveys_add_photos')}</Text>
+                </TouchableOpacity>
                 {survey.status === 'draft' && (
-                  <TouchableOpacity>
+                  <TouchableOpacity onPress={() => onNavigateTab?.('surveys')}>
                     <Text className="text-sm text-blue-600 font-semibold">{t('common_continue')}</Text>
                   </TouchableOpacity>
                 )}
@@ -120,19 +171,6 @@ export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
             </Card>
           ))}
         </View>
-
-        {/* Quick Actions */}
-        <Card className="bg-blue-600 mb-4">
-          <View className="py-2">
-            <Text className="text-white font-bold text-base mb-3">{t('dashboard_quick_actions')}</Text>
-            <Button variant="outline" className="bg-white mb-2">
-              <Text className="text-blue-600 font-semibold">{t('surveys_new_survey')}</Text>
-            </Button>
-            <Button variant="outline" className="bg-white">
-              <Text className="text-blue-600 font-semibold">{t('surveys_view')}</Text>
-            </Button>
-          </View>
-        </Card>
       </DashboardLayout>
     </View>
   );

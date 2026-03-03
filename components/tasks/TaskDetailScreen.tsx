@@ -121,7 +121,7 @@ export function TaskDetailScreen({ task, onBack }: TaskDetailScreenProps) {
           </TouchableOpacity>
         ) : undefined}
       />
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         {/* Task Header */}
         <Card className="mb-4">
           <View className="flex-row items-start justify-between mb-3">

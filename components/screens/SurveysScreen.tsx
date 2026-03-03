@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Pressable,
   Keyboard,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
@@ -18,16 +19,25 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
-import { parseSurveyFileContent, computeWorkVolume, computeCubature } from '@/lib/surveyParser';
+import { parseSurveyFileContent, computeWorkVolume, computeCubature, parseAndMergeSurveyFiles } from '@/lib/surveyParser';
 import { generateId } from '@/lib/id';
-import { Plus, MapPin, Calendar, CheckCircle } from 'lucide-react-native';
+import { pickSurveyTextFile } from '@/lib/readSurveyFile';
+import { Plus, MapPin, Calendar, CheckCircle, FileUp, Trash2, FileText } from 'lucide-react-native';
 import { ModalWithKeyboard } from '@/components/ui/ModalWithKeyboard';
 import { Button } from '@/components/ui/Button';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { colors, radius } from '@/theme/tokens';
 
-export function SurveysScreen() {
+type TopFileEntry = { id: string; name: string; content: string };
+type DepthFile = { name: string; content: string } | null;
+
+export interface SurveysScreenProps {
+  initialOpenNewSurveyModal?: boolean;
+  onClearOpenNewSurveyModal?: () => void;
+}
+
+export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyModal }: SurveysScreenProps = {}) {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
@@ -46,34 +56,108 @@ export function SurveysScreen() {
 
   const [newModalVisible, setNewModalVisible] = useState(false);
   const [submittingSurvey, setSubmittingSurvey] = useState(false);
+  const [computing, setComputing] = useState(false);
   const [siteId, setSiteId] = useState(sites[0]?.id ?? '');
-  const [beforeText, setBeforeText] = useState('');
-  const [afterText, setAfterText] = useState('');
+  const [topFiles, setTopFiles] = useState<TopFileEntry[]>([]);
+  const [depthFile, setDepthFile] = useState<DepthFile>(null);
   const [parsedVolume, setParsedVolume] = useState<number | null>(null);
   const [parsedCubature, setParsedCubature] = useState<{ totalCut: number; totalFill: number; surfaceUtile: number; triangleCount: number } | null>(null);
   const [beforeCount, setBeforeCount] = useState(0);
   const [afterCount, setAfterCount] = useState(0);
+  const [showDepthPaste, setShowDepthPaste] = useState(false);
 
-  const runParse = () => {
-    const beforePoints = parseSurveyFileContent(beforeText);
-    const afterPoints = parseSurveyFileContent(afterText);
-    const cubature = computeCubature(beforePoints, afterPoints);
-    const volume = computeWorkVolume(beforePoints, afterPoints);
-    setBeforeCount(beforePoints.length);
-    setAfterCount(afterPoints.length);
-    setParsedVolume(volume);
-    setParsedCubature(cubature);
+  useEffect(() => {
+    if (initialOpenNewSurveyModal && isSurveyor && sites.length > 0) {
+      setNewModalVisible(true);
+      onClearOpenNewSurveyModal?.();
+    }
+  }, [initialOpenNewSurveyModal, isSurveyor, sites.length, onClearOpenNewSurveyModal]);
+
+  const addTopFile = () => {
+    setTopFiles((prev) => [...prev, { id: generateId('tf'), name: '', content: '' }]);
+    setParsedVolume(null);
+    setParsedCubature(null);
   };
 
+  const setTopFileAtIndex = (index: number, patch: Partial<TopFileEntry>) => {
+    setTopFiles((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+    setParsedVolume(null);
+    setParsedCubature(null);
+  };
+
+  const removeTopFile = (index: number) => {
+    setTopFiles((prev) => prev.filter((_, i) => i !== index));
+    setParsedVolume(null);
+    setParsedCubature(null);
+  };
+
+  const pickTopFile = async (index: number) => {
+    const picked = await pickSurveyTextFile();
+    if (picked) setTopFileAtIndex(index, { name: picked.name, content: picked.content });
+  };
+
+  const pickDepthFile = async () => {
+    const picked = await pickSurveyTextFile();
+    if (picked) {
+      setDepthFile({ name: picked.name, content: picked.content });
+      setParsedVolume(null);
+      setParsedCubature(null);
+    }
+  };
+
+  const runParse = useCallback(() => {
+    const topContents = topFiles.map((f) => f.content).filter((c) => c.trim());
+    const depthContent = depthFile?.content?.trim();
+    if (topContents.length === 0) {
+      showToast(t('surveys_top_required'));
+      return;
+    }
+    if (!depthContent) {
+      showToast(t('surveys_depth_required'));
+      return;
+    }
+    setComputing(true);
+    setParsedVolume(null);
+    setParsedCubature(null);
+    setTimeout(() => {
+      try {
+        const beforePoints = parseAndMergeSurveyFiles(topContents);
+        const afterPoints = parseSurveyFileContent(depthContent);
+        const cubature = computeCubature(beforePoints, afterPoints);
+        const volume = computeWorkVolume(beforePoints, afterPoints);
+        setBeforeCount(beforePoints.length);
+        setAfterCount(afterPoints.length);
+        setParsedVolume(volume);
+        setParsedCubature(cubature);
+      } finally {
+        setComputing(false);
+      }
+    }, 0);
+  }, [topFiles, depthFile, t, showToast]);
+
   const submitNewSurvey = async () => {
-    const beforePoints = parseSurveyFileContent(beforeText);
-    const afterPoints = parseSurveyFileContent(afterText);
+    const topContents = topFiles.map((f) => f.content).filter((c) => c.trim());
+    if (topContents.length === 0) {
+      showToast(t('surveys_top_required'));
+      return;
+    }
+    if (!depthFile?.content?.trim()) {
+      showToast(t('surveys_depth_required'));
+      return;
+    }
+    const beforePoints = parseAndMergeSurveyFiles(topContents);
+    const afterPoints = parseSurveyFileContent(depthFile.content);
     const volume = computeWorkVolume(beforePoints, afterPoints);
     const site = sites.find((s) => s.id === siteId);
     if (!site || !user?.id) return;
     Keyboard.dismiss();
     setSubmittingSurvey(true);
     try {
+      const beforeFileContent = topContents.join('\n\n');
       await addSurvey({
         id: generateId('sv'),
         type: 'Before/After Survey',
@@ -83,13 +167,13 @@ export function SurveysScreen() {
         measurements: {},
         status: 'submitted',
         createdAt: new Date().toISOString(),
-        beforeFileContent: beforeText,
-        afterFileContent: afterText,
+        beforeFileContent,
+        afterFileContent: depthFile.content,
         workVolume: volume,
       });
       setNewModalVisible(false);
-      setBeforeText('');
-      setAfterText('');
+      setTopFiles([]);
+      setDepthFile(null);
       setParsedVolume(null);
       setParsedCubature(null);
       showToast(t('surveys_toast_submitted'));
@@ -129,8 +213,8 @@ export function SurveysScreen() {
             <TouchableOpacity
               onPress={() => {
                 setSiteId(sites[0]?.id ?? '');
-                setBeforeText('');
-                setAfterText('');
+                setTopFiles([]);
+                setDepthFile(null);
                 setParsedVolume(null);
                 setParsedCubature(null);
                 setNewModalVisible(true);
@@ -146,7 +230,7 @@ export function SurveysScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
       >
         {loading ? (
@@ -258,12 +342,59 @@ export function SurveysScreen() {
             </Pressable>
           ))}
         </View>
-        <Text style={modalStyles.label}>{t('surveys_before_file')}</Text>
-        <TextInput value={beforeText} onChangeText={(txt) => { setBeforeText(txt); setParsedVolume(null); setParsedCubature(null); }} placeholder="pt0,4746483.0150,492544.8142,1419.0430,..." multiline numberOfLines={4} placeholderTextColor={colors.placeholder} style={[modalStyles.input, { minHeight: 80 }]} />
-        <Text style={modalStyles.label}>{t('surveys_after_file')}</Text>
-        <TextInput value={afterText} onChangeText={(txt) => { setAfterText(txt); setParsedVolume(null); setParsedCubature(null); }} placeholder="pt0,4746486.3917,492580.3485,1417.6798,..." multiline numberOfLines={4} placeholderTextColor={colors.placeholder} style={[modalStyles.input, { minHeight: 80 }]} />
-        <TouchableOpacity onPress={runParse} style={{ backgroundColor: colors.gray700, borderRadius: radius.md, paddingVertical: 12, marginBottom: 12, alignItems: 'center' }}>
-          <Text style={{ color: '#fff', fontWeight: '600' }}>{t('surveys_parse_volume')}</Text>
+        <Text style={modalStyles.label}>{t('surveys_top_files')}</Text>
+        {topFiles.map((f, index) => (
+          <View key={f.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.gray100, borderRadius: radius.md }}>
+            <FileText size={20} color={colors.gray600} style={{ marginRight: 10 }} />
+            <Text style={{ flex: 1, fontSize: 14, color: colors.gray800 }} numberOfLines={1}>
+              {f.name || (f.content.trim() ? t('surveys_paste_placeholder') : `${t('surveys_top_file_add')} #${index + 1}`)}
+            </Text>
+            <TouchableOpacity onPress={() => pickTopFile(index)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, backgroundColor: colors.blue600, borderRadius: radius.sm, marginRight: 8 }}>
+              <FileUp size={14} color="#fff" />
+              <Text style={{ fontSize: 12, color: '#fff', marginLeft: 4 }}>{t('surveys_pick_file')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => removeTopFile(index)} style={{ padding: 4 }}>
+              <Trash2 size={18} color={colors.gray600} />
+            </TouchableOpacity>
+          </View>
+        ))}
+        <TouchableOpacity onPress={addTopFile} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.gray400, borderRadius: radius.md }}>
+          <Plus size={18} color={colors.gray600} />
+          <Text style={{ color: colors.gray600, fontWeight: '500', marginLeft: 6 }}>{t('surveys_top_file_add')}</Text>
+        </TouchableOpacity>
+
+        <Text style={modalStyles.label}>{t('surveys_depth_file')}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.gray100, borderRadius: radius.md }}>
+          <FileText size={20} color={colors.gray600} style={{ marginRight: 10 }} />
+          <Text style={{ flex: 1, fontSize: 14, color: depthFile?.name || depthFile?.content?.trim() ? colors.gray800 : colors.gray500 }} numberOfLines={1}>
+            {depthFile ? (depthFile.name || (depthFile.content.trim() ? t('surveys_paste_placeholder') : '')) : ''}
+          </Text>
+          <TouchableOpacity onPress={pickDepthFile} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, backgroundColor: colors.blue600, borderRadius: radius.sm, marginRight: 6 }}>
+            <FileUp size={14} color="#fff" />
+            <Text style={{ fontSize: 12, color: '#fff', marginLeft: 4 }}>{t('surveys_pick_file')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowDepthPaste((v) => !v)} style={{ paddingVertical: 4, paddingHorizontal: 6 }}>
+            <Text style={{ fontSize: 12, color: colors.blue600 }}>{showDepthPaste ? t('common_cancel') : t('surveys_paste_placeholder')}</Text>
+          </TouchableOpacity>
+        </View>
+        {showDepthPaste && (
+          <TextInput
+            placeholder="Paste depth file content here"
+            placeholderTextColor={colors.placeholder}
+            multiline
+            numberOfLines={3}
+            value={depthFile?.content ?? ''}
+            onChangeText={(txt) => setDepthFile((prev) => (prev ? { ...prev, content: txt, name: prev.name || 'Pasted' } : { name: 'Pasted', content: txt }))}
+            style={[modalStyles.input, { minHeight: 56, fontSize: 11, marginBottom: 8 }]}
+          />
+        )}
+        {!depthFile?.content?.trim() && (
+          <Text style={[modalStyles.label, { fontSize: 12, color: colors.gray500, marginTop: 0, marginBottom: 8 }]}>{t('surveys_depth_required')}</Text>
+        )}
+
+        <TouchableOpacity onPress={runParse} disabled={computing} style={{ backgroundColor: computing ? colors.gray400 : colors.gray700, borderRadius: radius.md, paddingVertical: 12, marginBottom: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}>
+          {computing ? <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} /> : null}
+          <Text style={{ color: '#fff', fontWeight: '600' }}>{computing ? t('surveys_computing') : t('surveys_parse_volume')}</Text>
         </TouchableOpacity>
         {(parsedVolume !== null || parsedCubature !== null) && (
           <View style={{ marginBottom: 16, padding: 12, backgroundColor: colors.gray100, borderRadius: radius.md }}>

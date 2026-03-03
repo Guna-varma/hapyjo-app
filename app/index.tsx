@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { MockAppStoreProvider } from '@/context/MockAppStoreContext';
@@ -7,7 +7,39 @@ import { LocaleProvider , useLocale } from '@/context/LocaleContext';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { AppNavigation } from '@/components/navigation/AppNavigation';
 import { PushTokenRegistration } from '@/components/PushTokenRegistration';
+import { DemoNotificationScheduler } from '@/components/DemoNotificationScheduler';
+import { requestNotificationPermissionAsync } from '@/lib/registerPushToken';
 import '../global.css';
+
+/** Asks for notification permission when on login screen so Android Expo Go and APK show the system prompt. */
+function RequestNotificationPermissionOnLoginScreen() {
+  const requested = useRef(false);
+  const { isAuthenticated, authLoading } = useAuth();
+  useEffect(() => {
+    if (authLoading || isAuthenticated || requested.current) return;
+    const t = setTimeout(() => {
+      requestNotificationPermissionAsync();
+      requested.current = true;
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [isAuthenticated, authLoading]);
+  return null;
+}
+
+/** Asks for notification permission for ALL user types when they are logged in, so system notifications show in the tray. */
+function RequestNotificationPermissionWhenAuthenticated() {
+  const requested = useRef(false);
+  const { isAuthenticated } = useAuth();
+  useEffect(() => {
+    if (!isAuthenticated || requested.current) return;
+    requested.current = true;
+    const t = setTimeout(() => {
+      requestNotificationPermissionAsync();
+    }, 500);
+    return () => clearTimeout(t);
+  }, [isAuthenticated]);
+  return null;
+}
 
 function AppContent() {
   const { isAuthenticated, authLoading } = useAuth();
@@ -25,12 +57,19 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen />;
+    return (
+      <>
+        <RequestNotificationPermissionOnLoginScreen />
+        <LoginScreen />
+      </>
+    );
   }
 
   return (
     <>
+      <RequestNotificationPermissionWhenAuthenticated />
       <PushTokenRegistration />
+      <DemoNotificationScheduler />
       <AppNavigation />
     </>
   );
@@ -42,7 +81,7 @@ export default function HomeScreen() {
       <LocaleProvider>
         <MockAppStoreProvider>
           <ToastProvider>
-            <View className="flex-1">
+            <View style={{ flex: 1 }}>
               <AppContent />
             </View>
           </ToastProvider>

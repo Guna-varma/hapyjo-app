@@ -436,7 +436,7 @@ export function ReportsScreen() {
   return (
     <View className="flex-1 bg-gray-50">
       <Header title={t('reports_title')} subtitle={getReportsSubtitle(user?.role, t)} />
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         {loading ? (
           <View className="py-12 items-center">
             <ActivityIndicator size="large" color="#2563eb" />

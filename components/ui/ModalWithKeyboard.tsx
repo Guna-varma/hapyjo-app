@@ -102,6 +102,7 @@ const styles = StyleSheet.create({
   },
   footerWrap: {
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
   },
 });

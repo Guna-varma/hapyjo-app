@@ -11,6 +11,7 @@ import type { UserRole } from '@/types';
 export type NotificationScenarioId =
   | 'issue_raised'
   | 'issue_resolved'
+  | 'trip_started'
   | 'trip_completed'
   | 'expense_added'
   | 'survey_submitted'
@@ -19,10 +20,14 @@ export type NotificationScenarioId =
   | 'user_created'
   | 'password_reset'
   | 'site_assignment'
+  | 'site_added'
   | 'driver_vehicle_assignment'
   | 'machine_session_completed'
+  | 'machine_session_started'
   | 'task_completed'
-  | 'vehicle_added';
+  | 'task_assigned'
+  | 'vehicle_added'
+  | 'vehicle_updated';
 
 export interface NotificationScenario {
   id: NotificationScenarioId;
@@ -60,6 +65,20 @@ const scenarios: Record<NotificationScenarioId, NotificationScenario> = {
       const status = p.status ? `Status: ${String(p.status)}.` : 'Updated.';
       const desc = typeof p.description === 'string' ? p.description.slice(0, 80) : '';
       return `${site}${status} ${desc}`.trim();
+    },
+  },
+
+  trip_started: {
+    id: 'trip_started',
+    targetRoles: ['owner', 'head_supervisor', 'assistant_supervisor'],
+    linkType: 'trip',
+    linkIdKey: 'id',
+    getTitle: () => 'Trip started – track live',
+    getBody: (p) => {
+      const site = p.siteName ? `[${p.siteName}] ` : '';
+      const vehicle = p.vehicleNumberOrId ? ` ${String(p.vehicleNumberOrId)}` : '';
+      const driver = p.driverName ? ` • ${String(p.driverName)}` : '';
+      return `${site}${vehicle}${driver}`.trim() || 'Driver started a trip. Open app to track live location.';
     },
   },
 
@@ -212,6 +231,58 @@ const scenarios: Record<NotificationScenarioId, NotificationScenario> = {
       const type = p.type ? ` (${String(p.type)})` : '';
       const site = p.siteName ? ` at [${p.siteName}]` : '';
       return `${vehicle}${type}${site}`;
+    },
+  },
+
+  vehicle_updated: {
+    id: 'vehicle_updated',
+    targetRoles: ['owner', 'head_supervisor', 'assistant_supervisor', 'driver_truck', 'driver_machine'],
+    linkType: 'vehicle',
+    linkIdKey: 'id',
+    getTitle: () => 'Vehicle updated',
+    getBody: (p) => {
+      const vehicle = p.vehicleNumberOrId ? String(p.vehicleNumberOrId) : 'Vehicle';
+      const site = p.siteName ? ` [${p.siteName}]` : '';
+      return `${vehicle}${site}`;
+    },
+  },
+
+  site_added: {
+    id: 'site_added',
+    targetRoles: ['admin', 'owner', 'head_supervisor', 'assistant_supervisor'],
+    linkType: 'site',
+    linkIdKey: 'id',
+    getTitle: () => 'New site added',
+    getBody: (p) => {
+      const name = p.name ? String(p.name) : 'Site';
+      const location = p.location ? ` – ${String(p.location)}` : '';
+      return `${name}${location}`;
+    },
+  },
+
+  task_assigned: {
+    id: 'task_assigned',
+    targetRoles: ['owner', 'head_supervisor', 'assistant_supervisor', 'driver_truck', 'driver_machine'],
+    linkType: 'task',
+    linkIdKey: 'id',
+    getTitle: () => 'Task assigned',
+    getBody: (p) => {
+      const title = p.title ? String(p.title) : 'Task';
+      const site = p.siteName ? ` [${p.siteName}]` : '';
+      return `${title}${site}`;
+    },
+  },
+
+  machine_session_started: {
+    id: 'machine_session_started',
+    targetRoles: ['owner', 'head_supervisor', 'assistant_supervisor'],
+    linkType: 'machine_session',
+    linkIdKey: 'id',
+    getTitle: () => 'Machine session started',
+    getBody: (p) => {
+      const site = p.siteName ? `[${p.siteName}]` : 'Site';
+      const vehicle = p.vehicleNumberOrId ? ` ${String(p.vehicleNumberOrId)}` : '';
+      return `${site}${vehicle}`.trim();
     },
   },
 };

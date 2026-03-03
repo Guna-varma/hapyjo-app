@@ -92,6 +92,7 @@ Deno.serve(async (req) => {
       title: String(title),
       body: String(body),
       sound: "default" as const,
+      channelId: "default",
       data: {
         linkId: link_id ?? undefined,
         linkType: link_type ?? undefined,

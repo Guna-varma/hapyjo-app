@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Pressable, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { SiteCard } from '@/components/sites/SiteCard';
 import { Header } from '@/components/ui/Header';

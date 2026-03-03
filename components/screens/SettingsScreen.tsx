@@ -75,7 +75,7 @@ export function SettingsScreen() {
   return (
     <View className="flex-1 bg-gray-50">
       <Header title={t('settings_title')} subtitle={t('settings_subtitle')} />
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         <Card className="mb-4">
           <View className="items-center py-4">
             <View className="w-20 h-20 bg-blue-600 rounded-full items-center justify-center mb-3">

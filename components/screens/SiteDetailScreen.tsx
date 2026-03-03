@@ -106,7 +106,7 @@ export function SiteDetailScreen({ site, onBack }: SiteDetailScreenProps) {
         }
       />
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         <Card className="mb-4">
           <Text className="text-sm text-gray-600">{t('site_detail_status')}</Text>
           <Text className="font-semibold text-gray-900 capitalize">{site.status}</Text>

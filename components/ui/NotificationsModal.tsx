@@ -35,7 +35,7 @@ export function NotificationsModal({ visible, onClose }: NotificationsModalProps
       activeOpacity={0.7}
     >
       <Text style={styles.itemTitle} numberOfLines={1}>
-        {n.linkType === 'issue' ? t('notification_new_issue') : n.title}
+        {n.title}
       </Text>
       <Text style={styles.itemBody} numberOfLines={2}>
         {n.body}

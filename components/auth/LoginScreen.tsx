@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { useResponsiveTheme } from '@/theme/responsive';
 import { Button } from '@/components/ui/Button';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Eye, EyeOff } from 'lucide-react-native';
+import { requestNotificationPermissionAsync } from '@/lib/registerPushToken';
 
 export function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -25,6 +26,14 @@ export function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+
+  // Ask for notification permission so real system notifications work (Expo Go + real APK). Delay so Android activity is ready.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      requestNotificationPermissionAsync();
+    }, 1500);
+    return () => clearTimeout(t);
+  }, []);
   const { t } = useLocale();
   const insets = useSafeAreaInsets();
   const theme = useResponsiveTheme();
@@ -35,6 +44,8 @@ export function LoginScreen() {
       Alert.alert(t('alert_error'), t('login_enter_both'));
       return;
     }
+    // Request notification permission on Login tap (user gesture helps on Android Expo Go)
+    requestNotificationPermissionAsync();
 
     setLoading(true);
     try {

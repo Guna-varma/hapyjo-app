@@ -240,3 +240,29 @@ export function computeWorkVolume(
   const { totalCut } = computeCubature(beforePoints, afterPoints);
   return totalCut;
 }
+
+/**
+ * Merge multiple survey point arrays (e.g. from multiple TOP files) into one set.
+ * Deduplicates by (x,y) so the TIN has unique vertices; keeps first occurrence.
+ */
+export function mergeSurveyPoints(pointArrays: SurveyPoint[][]): SurveyPoint[] {
+  const seen = new Set<string>();
+  const out: SurveyPoint[] = [];
+  for (const points of pointArrays) {
+    for (const p of points) {
+      const key = `${p.x.toFixed(4)}_${p.y.toFixed(4)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse multiple file contents and merge into one point set (for multiple TOP files).
+ */
+export function parseAndMergeSurveyFiles(contents: string[]): SurveyPoint[] {
+  const pointArrays = contents.filter((c) => c.trim()).map(parseSurveyFileContent);
+  return mergeSurveyPoints(pointArrays);
+}

@@ -155,7 +155,7 @@ export function IssuesScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
       >
         {loading ? (

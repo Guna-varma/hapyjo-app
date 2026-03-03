@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { profileFromRow } from '@/lib/supabaseMappers';
+import { showSystemNotification } from '@/lib/localNotifications';
 
 interface AuthContextType {
   user: User | null;
@@ -127,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    await showSystemNotification('Hapyjo', 'You are signed out.');
     await supabase.auth.signOut();
     setUser(null);
   };

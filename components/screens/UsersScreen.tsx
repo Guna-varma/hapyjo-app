@@ -8,7 +8,6 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonList } from '@/components/ui/SkeletonLoader';
 import { useAuth } from '@/context/AuthContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
-import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { useLocale } from '@/context/LocaleContext';
 import { canCreateUser, getRoleLabelKey, getAssignableRoles } from '@/lib/rbac';
@@ -52,7 +51,6 @@ export function UsersScreen() {
   const { t } = useLocale();
   const theme = useResponsiveTheme();
   const { users, updateUser, createUserByOwner, resetUserPassword, setSiteAssignment, sites, refetch, loading } = useMockAppStore();
-  const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -295,7 +293,7 @@ export function UsersScreen() {
       />
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding, flexGrow: 1 }}
+        contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={() => Keyboard.dismiss()}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}

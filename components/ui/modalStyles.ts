@@ -34,10 +34,11 @@ export const modalStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.sm,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
   },
   btn: {
     minWidth: 100,

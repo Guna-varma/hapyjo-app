@@ -118,7 +118,7 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
           </PressableScale>
         }
       />
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         {mySiteIds.length > 1 && (
           <View className="mb-3">
             <Text className="text-xs text-gray-500 mb-2">{t('driver_allocation_site_picker')}</Text>
