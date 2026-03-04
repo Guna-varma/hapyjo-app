@@ -10,6 +10,8 @@ import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { Button } from '@/components/ui/Button';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { colors } from '@/theme/tokens';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
@@ -203,7 +205,7 @@ export function ReportsScreen() {
       const id = e.vehicleId!;
       if (!acc[id]) acc[id] = { litres: 0, cost: 0 };
       acc[id].litres += e.litres ?? 0;
-      acc[id].cost += e.amountRwf;
+      acc[id].cost += e.amountRwf ?? 0;
       return acc;
     }, {});
   const tripDistanceByVehicle = trips
@@ -250,9 +252,9 @@ export function ReportsScreen() {
     actualFuelByVehicle[v.id] = fromTrips + fromSessions;
   });
 
-  const totalSpentAll = sites.reduce((sum, s) => sum + s.spent, 0);
-  const totalBudgetAll = sites.reduce((sum, s) => sum + s.budget, 0);
-  const remainingBudgetAll = totalBudgetAll - totalSpentAll;
+  const totalSpentAll = sites.reduce((sum, s) => sum + (s.spent ?? 0), 0);
+  const totalBudgetAll = sites.reduce((sum, s) => sum + (s.budget ?? 0), 0);
+  const remainingBudgetAll = Math.max(0, totalBudgetAll - totalSpentAll);
 
   // Live data for Operations tab (not from saved reports)
   const activeSitesCount = sites.filter((s) => s.status === 'active').length;
@@ -434,12 +436,12 @@ export function ReportsScreen() {
   };
 
   return (
-    <View className="flex-1 bg-gray-50">
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Header title={t('reports_title')} subtitle={getReportsSubtitle(user?.role, t)} />
       <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         {loading ? (
           <View className="py-12 items-center">
-            <ActivityIndicator size="large" color="#2563eb" />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text className="text-gray-600 mt-3">{t('reports_loading')}</Text>
           </View>
         ) : (
@@ -467,7 +469,7 @@ export function ReportsScreen() {
                 }`}
                 style={{ marginRight: 8 }}
               >
-                <Icon size={18} color={isSelected ? '#ffffff' : '#475569'} />
+                <Icon size={18} color={isSelected ? colors.surface : colors.gray600} />
                 <Text
                   className={`ml-2 font-semibold ${isSelected ? 'text-white' : 'text-gray-700'}`}
                   style={{ fontSize: 13 }}
@@ -482,7 +484,7 @@ export function ReportsScreen() {
         {readOnly && (
           <Card className="mb-4 bg-amber-50 border border-amber-200">
             <View className="flex-row items-center py-2">
-              <Lock size={20} color="#B45309" />
+              <Lock size={20} color={colors.textSecondary} />
               <Text className="text-amber-800 font-semibold ml-2">{t('reports_read_only')}</Text>
             </View>
             <Text className="text-sm text-amber-700">{t('reports_read_only_hint')}</Text>
@@ -525,7 +527,7 @@ export function ReportsScreen() {
               return (
                 <Card key={site.id} style={reportCardStyles.siteCard}>
                   <View style={reportCardStyles.siteCardHeader}>
-                    <TrendingUp size={18} color="#2563eb" />
+                    <TrendingUp size={18} color={colors.primary} />
                     <Text style={reportCardStyles.siteCardName}>{site.name}</Text>
                   </View>
                   <Text style={reportCardStyles.siteCardLocation}>{site.location}</Text>
@@ -698,7 +700,7 @@ export function ReportsScreen() {
                     </View>
                     <View>
                       <Text className="text-xs text-gray-500">{t('reports_remaining_l')}</Text>
-                      <Text className="text-sm font-semibold">{v.fuelBalanceLitre.toFixed(1)}</Text>
+                      <Text className="text-sm font-semibold">{(v.fuelBalanceLitre ?? 0).toFixed(1)}</Text>
                     </View>
                   </View>
                 </Card>
@@ -713,15 +715,11 @@ export function ReportsScreen() {
             {selectedType === 'all' ? t('reports_available') : selectedType === 'financial' ? t('reports_saved_financial') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
           </Text>
           {filteredReports.length === 0 ? (
-            <Card style={reportCardStyles.emptyCard}>
-              <FileText size={32} color="#94a3b8" />
-              <Text style={reportCardStyles.emptyTitle}>
-                {selectedType === 'all' ? t('reports_no_reports') : t('reports_no_reports_for_type')}
-              </Text>
-              <Text style={reportCardStyles.emptySubtext}>
-                {selectedType === 'financial' ? t('reports_empty_financial_hint') : selectedType === 'operations' ? t('reports_empty_operations_hint') : selectedType === 'site_performance' ? t('reports_empty_sites_hint') : t('reports_empty_hint')}
-              </Text>
-            </Card>
+            <EmptyState
+              icon={<FileText size={32} color={colors.textMuted} />}
+              title={selectedType === 'all' ? t('reports_no_reports') : t('reports_no_reports_for_type')}
+              message={selectedType === 'financial' ? t('reports_empty_financial_hint') : selectedType === 'operations' ? t('reports_empty_operations_hint') : selectedType === 'site_performance' ? t('reports_empty_sites_hint') : t('reports_empty_hint')}
+            />
           ) : (
             filteredReports.map((report) => (
               <Card key={report.id} style={reportCardStyles.card}>
@@ -729,9 +727,9 @@ export function ReportsScreen() {
                   <View style={reportCardStyles.titleRow}>
                     {report.type === 'financial' && <Banknote size={18} color="#059669" />}
                     {report.type === 'operations' && <BarChart3 size={18} color="#6366f1" />}
-                    {report.type === 'site_performance' && <TrendingUp size={18} color="#2563eb" />}
+                    {report.type === 'site_performance' && <TrendingUp size={18} color={colors.primary} />}
                     {report.type !== 'financial' && report.type !== 'operations' && report.type !== 'site_performance' && <FileText size={18} color="#64748b" />}
-                    <Text style={reportCardStyles.cardTitle} numberOfLines={1}>{report.title}</Text>
+                    <Text style={reportCardStyles.cardTitle} numberOfLines={2}>{report.title}</Text>
                   </View>
                   <View style={reportCardStyles.badge}>
                     <Text style={reportCardStyles.badgeText}>{report.period}</Text>
@@ -743,19 +741,19 @@ export function ReportsScreen() {
                   {report.type === 'financial' && report.data && (
                     <View style={reportCardStyles.dataRow}>
                       <Text style={reportCardStyles.dataLabel}>{t('reports_total_budget')}</Text>
-                      <Text style={reportCardStyles.dataValue}>{formatAmount(report.data.totalBudget, true)}</Text>
+                      <Text style={reportCardStyles.dataValue}>{formatAmount(Number(report.data.totalBudget) || 0, true)}</Text>
                     </View>
                   )}
                   {report.type === 'financial' && report.data && (
                     <View style={reportCardStyles.dataRow}>
                       <Text style={reportCardStyles.dataLabel}>{t('reports_total_spent')}</Text>
-                      <Text style={reportCardStyles.dataValue}>{formatAmount(report.data.totalSpent, true)}</Text>
+                      <Text style={reportCardStyles.dataValue}>{formatAmount(Number(report.data.totalSpent) || 0, true)}</Text>
                     </View>
                   )}
                   {report.type === 'financial' && report.data && (
                     <View style={reportCardStyles.dataRow}>
                       <Text style={reportCardStyles.dataLabel}>{t('dashboard_remaining')}</Text>
-                      <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{formatAmount(report.data.remainingBudget, true)}</Text>
+                      <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{formatAmount(Number(report.data.remainingBudget) || 0, true)}</Text>
                     </View>
                   )}
                   {report.type === 'operations' && report.data && (
@@ -786,7 +784,7 @@ export function ReportsScreen() {
                     >
                       <Download size={16} color="#2563eb" />
                       <Text style={reportCardStyles.exportBtnText}>
-                        {exportingId === report.id ? t('reports_exporting') : 'Export CSV'}
+                        {exportingId === report.id ? t('reports_exporting') : t('reports_export_csv')}
                       </Text>
                     </TouchableOpacity>
                   )}

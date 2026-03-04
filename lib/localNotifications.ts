@@ -56,6 +56,24 @@ async function ensureChannelAndHandler(Notifications: NonNullable<Awaited<Return
  * Template: title as main line, body as detail – like common apps. Uses default channel so icon and color apply.
  */
 export async function showSystemNotification(title: string, body: string): Promise<void> {
+  return showSystemNotificationWithData(title, body, undefined);
+}
+
+export interface NotificationData {
+  linkId?: string;
+  linkType?: string;
+  notificationId?: string;
+}
+
+/**
+ * Show a system notification with optional data for deep linking when user taps.
+ * Used by realtime INSERT handler so tap opens the correct tab/screen.
+ */
+export async function showSystemNotificationWithData(
+  title: string,
+  body: string,
+  data?: NotificationData
+): Promise<void> {
   const Notifications = await getNotificationsModule();
   if (!Notifications) return;
   try {
@@ -67,6 +85,7 @@ export async function showSystemNotification(title: string, body: string): Promi
         title: displayTitle,
         body: displayBody,
         sound: 'default',
+        data: (data ?? undefined) as Record<string, unknown> | undefined,
         ...(Platform.OS === 'android' && { channelId: ANDROID_CHANNEL_ID }),
       },
       trigger: null,
@@ -75,11 +94,3 @@ export async function showSystemNotification(title: string, body: string): Promi
     // ignore (e.g. Expo Go or permission denied)
   }
 }
-
-/** No-op: demo repeating notifications removed; only real-time system notifications are used. */
-export function startDemoRepeatingNotifications(): () => void {
-  return () => {};
-}
-
-/** No-op: kept for API compatibility (e.g. logout cleanup). */
-export function cancelDemoRepeatingNotifications(): void {}

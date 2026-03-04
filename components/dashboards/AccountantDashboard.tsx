@@ -15,14 +15,26 @@ const BREAKPOINT_SMALL = 400;
 export function AccountantDashboard(_props: DashboardNavProps = {}) {
   const { t } = useLocale();
   const { width } = useWindowDimensions();
-  const { sites, surveys, contractRateRwf } = useMockAppStore();
-  const totalBudget = sites.reduce((sum, site) => sum + site.budget, 0);
-  const totalSpent = sites.reduce((sum, site) => sum + site.spent, 0);
-  const remaining = totalBudget - totalSpent;
-  const workVolume = surveys.filter((s) => s.status === 'approved' && s.workVolume != null).reduce((sum, s) => sum + (s.workVolume ?? 0), 0);
-  const revenue = workVolume * contractRateRwf;
+  const { sites, surveys } = useMockAppStore();
+  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
+  const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
+  const remaining = Math.max(0, totalBudget - totalSpent);
+  const revenue = sites.reduce((sum, site) => {
+    const siteVolume = surveys
+      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
+      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+    return sum + siteVolume * (site.contractRateRwf ?? 0);
+  }, 0);
   const totalCost = totalSpent;
   const profit = revenue - totalCost;
+
+  const siteAllocations = sites.map((site) => {
+    const siteVolume = surveys
+      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
+      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+    const siteRevenue = siteVolume * (site.contractRateRwf ?? 0);
+    return { site, budget: site.budget ?? 0, spent: site.spent ?? 0, revenue: siteRevenue };
+  });
 
   const isSmall = width < BREAKPOINT_SMALL;
   const cardContainerStyle = isSmall ? styles.cardColumn : styles.cardRow;
@@ -61,6 +73,29 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
             </Card>
           ))}
         </View>
+
+        {sites.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>{t('dashboard_allocation_per_site')}</Text>
+            {siteAllocations.map(({ site, budget, spent, revenue }) => (
+              <Card key={site.id} style={styles.siteAllocCard}>
+                <Text style={styles.siteAllocName}>{site.name}</Text>
+                <View style={styles.siteAllocRow}>
+                  <Text style={styles.siteAllocLabel}>{t('dashboard_total_budget')}</Text>
+                  <Text style={styles.siteAllocValue}>{formatAmount(budget, true)}</Text>
+                </View>
+                <View style={styles.siteAllocRow}>
+                  <Text style={styles.siteAllocLabel}>{t('dashboard_total_spent')}</Text>
+                  <Text style={styles.siteAllocValue}>{formatAmount(spent, true)}</Text>
+                </View>
+                <View style={styles.siteAllocRow}>
+                  <Text style={styles.siteAllocLabel}>{t('dashboard_revenue')}</Text>
+                  <Text style={styles.siteAllocValue}>{formatAmount(revenue, true)}</Text>
+                </View>
+              </Card>
+            ))}
+          </>
+        )}
 
         <Card style={styles.reportsCard}>
           <View style={styles.cardRowInner}>
@@ -148,4 +183,21 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 8,
   },
+  siteAllocCard: {
+    marginBottom: layout.cardSpacingVertical,
+    backgroundColor: colors.gray50,
+  },
+  siteAllocName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  siteAllocRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  siteAllocLabel: { fontSize: 13, color: colors.textSecondary },
+  siteAllocValue: { fontSize: 14, fontWeight: '600', color: colors.text },
 });

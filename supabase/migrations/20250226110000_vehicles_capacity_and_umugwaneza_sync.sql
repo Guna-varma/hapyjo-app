@@ -30,6 +30,7 @@ SET search_path = public, umugwaneza
 AS $$
 DECLARE
   v_business_id text;
+  v_site_name text;
 BEGIN
   SELECT value INTO v_business_id FROM public.umugwaneza_sync_config WHERE key = 'default_business_id' LIMIT 1;
   IF v_business_id IS NULL THEN
@@ -46,12 +47,15 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM umugwaneza.vehicles WHERE hapyjo_vehicle_id = NEW.id LIMIT 1) THEN
+    SELECT name INTO v_site_name FROM public.sites WHERE id = NEW.site_id LIMIT 1;
     UPDATE umugwaneza.vehicles
     SET vehicle_name = NEW.vehicle_number_or_id,
         vehicle_type = CASE WHEN NEW.type = 'truck' THEN 'TRUCK' ELSE 'MACHINE' END,
+        current_location = COALESCE(v_site_name, current_location),
         updated_at = now()
     WHERE hapyjo_vehicle_id = NEW.id;
   ELSE
+    SELECT name INTO v_site_name FROM public.sites WHERE id = NEW.site_id LIMIT 1;
     INSERT INTO umugwaneza.vehicles (
       id, business_id, hapyjo_vehicle_id, vehicle_name, vehicle_type,
       rental_type, ownership_type, base_rate, current_status, current_location, notes,
@@ -63,7 +67,7 @@ BEGIN
       NEW.id,
       NEW.vehicle_number_or_id,
       CASE WHEN NEW.type = 'truck' THEN 'TRUCK' ELSE 'MACHINE' END,
-      'DAY', 'OWN', 0, 'AVAILABLE', NULL, NULL,
+      'DAY', 'OWN', 0, 'AVAILABLE', v_site_name, NULL,
       now(), now()
     );
   END IF;

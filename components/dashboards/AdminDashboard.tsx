@@ -23,24 +23,27 @@ import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 
 export function AdminDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { t } = useLocale();
-  const { sites, surveys, trips, machineSessions, contractRateRwf } = useMockAppStore();
-  const totalBudget = sites.reduce((sum, site) => sum + site.budget, 0);
-  const totalSpent = sites.reduce((sum, site) => sum + site.spent, 0);
+  const { sites, surveys, trips, machineSessions } = useMockAppStore();
+  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
+  const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
   const activeSites = sites.filter((s) => s.status === 'active').length;
-  const workVolume = surveys
-    .filter((s) => s.status === 'approved' && s.workVolume != null)
-    .reduce((sum, s) => sum + (s.workVolume ?? 0), 0);
-  const revenue = workVolume * contractRateRwf;
+  const revenue = sites.reduce((sum, site) => {
+    const siteVolume = surveys
+      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
+      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+    return sum + siteVolume * (site.contractRateRwf ?? 0);
+  }, 0);
   const totalCost = totalSpent;
   const profit = revenue - totalCost;
   const truckDistance = trips.filter((t) => t.status === 'completed').reduce((s, t) => s + t.distanceKm, 0);
   const machineHours = machineSessions.filter((m) => m.status === 'completed').reduce((s, m) => s + (m.durationHours ?? 0), 0);
+  const workVolume = surveys.filter((s) => s.status === 'approved').reduce((v, s) => v + (s.workVolume ?? 0), 0);
 
   const stats = [
     { icon: <Building2 size={24} color="#3B82F6" />, label: t('dashboard_active_sites'), value: activeSites.toString(), bg: 'bg-blue-50' },
     { icon: <Banknote size={24} color="#10B981" />, label: t('dashboard_total_budget'), value: formatAmount(totalBudget, true), bg: 'bg-green-50' },
     { icon: <CheckCircle2 size={24} color="#8B5CF6" />, label: t('dashboard_total_spent'), value: formatAmount(totalSpent, true), bg: 'bg-purple-50' },
-    { icon: <AlertTriangle size={24} color="#F59E0B" />, label: t('dashboard_remaining'), value: formatAmount(totalBudget - totalSpent, true), bg: 'bg-yellow-50' },
+    { icon: <AlertTriangle size={24} color="#F59E0B" />, label: t('dashboard_remaining'), value: formatAmount(Math.max(0, totalBudget - totalSpent), true), bg: 'bg-yellow-50' },
     { icon: <TrendingUp size={24} color="#059669" />, label: t('dashboard_revenue'), value: formatAmount(revenue, true), bg: 'bg-emerald-50' },
     { icon: <Banknote size={24} color="#DC2626" />, label: t('dashboard_profit'), value: formatAmount(profit, true), bg: profit >= 0 ? 'bg-green-50' : 'bg-red-50' },
   ];

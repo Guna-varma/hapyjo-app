@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { TouchableOpacity, Text, Modal, Pressable } from 'react-native';
 import { Globe } from 'lucide-react-native';
 import { useLocale } from '@/context/LocaleContext';
+import { colors } from '@/theme/tokens';
 
 /**
  * Small language switcher (globe icon). Tapping opens a modal to choose English or Kinyarwanda.
@@ -23,7 +24,7 @@ export function LanguageSwitcher() {
         className="w-9 h-9 rounded-full bg-slate-100 items-center justify-center"
         accessibilityLabel={t('settings_language')}
       >
-        <Globe size={18} color="#475569" />
+        <Globe size={18} color={colors.gray500} />
       </TouchableOpacity>
       <Modal visible={modalVisible} transparent animationType="fade">
         <Pressable

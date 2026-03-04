@@ -27,66 +27,142 @@ export function SiteDetailScreen({ site, onBack }: SiteDetailScreenProps) {
   const { t } = useLocale();
   const theme = useResponsiveTheme();
   const {
+    sites,
     vehicles,
     users,
     siteAssignments,
     setSiteAssignment,
+    removeSiteAssignment,
     setDriverVehicleAssignment,
     updateSite,
   } = useMockAppStore();
   const isHeadSupervisor = user?.role === 'head_supervisor';
 
   const siteVehicles = vehicles.filter((v) => v.siteId === site.id);
+
+  // Only real roles per slot; exclude admin/owner by role and by display name (test accounts)
+  const isExcludedFromDriverOperator = (u: { role: string; name?: string }) => {
+    const roleExcluded = ['admin', 'owner', 'head_supervisor', 'accountant', 'assistant_supervisor', 'surveyor'].includes(u.role);
+    const nameExcluded = (u.name ?? '').trim().toLowerCase() === 'admin' || (u.name ?? '').trim().toLowerCase() === 'owner';
+    return roleExcluded || nameExcluded;
+  };
   const assignableByRole = {
     assistant_supervisor: users.filter((u) => u.role === 'assistant_supervisor'),
     surveyor: users.filter((u) => u.role === 'surveyor'),
-    driver_truck: users.filter((u) => u.role === 'driver_truck'),
-    driver_machine: users.filter((u) => u.role === 'driver_machine'),
+    driver_truck: users.filter((u) => u.role === 'driver_truck' && !isExcludedFromDriverOperator(u)),
+    driver_machine: users.filter((u) => u.role === 'driver_machine' && !isExcludedFromDriverOperator(u)),
   };
   const assignmentsForSite = siteAssignments.filter((a) => a.siteId === site.id);
 
-  const getAssignedUserId = (role: string) =>
-    assignmentsForSite.find((a) => a.role === role)?.userId ?? null;
+  const getAssignedUserIds = (role: string) =>
+    assignmentsForSite.filter((a) => a.role === role).map((a) => a.userId);
   const getAssignedVehicleIds = () => {
     const row = assignmentsForSite.find((a) => a.role === 'assistant_supervisor');
     return row?.vehicleIds ?? [];
   };
 
-  const [selectedAssistant, setSelectedAssistant] = useState<string | null>(getAssignedUserId('assistant_supervisor'));
-  const [selectedSurveyor, setSelectedSurveyor] = useState<string | null>(getAssignedUserId('surveyor'));
-  const [selectedDriverTruck, setSelectedDriverTruck] = useState<string | null>(getAssignedUserId('driver_truck'));
-  const [selectedDriverMachine, setSelectedDriverMachine] = useState<string | null>(getAssignedUserId('driver_machine'));
-  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>(getAssignedVehicleIds());
+  const [selectedAssistants, setSelectedAssistants] = useState<string[]>(() => getAssignedUserIds('assistant_supervisor'));
+  const [selectedSurveyors, setSelectedSurveyors] = useState<string[]>(() => getAssignedUserIds('surveyor'));
+  const [selectedDriverTrucks, setSelectedDriverTrucks] = useState<string[]>(() => getAssignedUserIds('driver_truck'));
+  const [selectedDriverMachines, setSelectedDriverMachines] = useState<string[]>(() => getAssignedUserIds('driver_machine'));
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>(() => getAssignedVehicleIds());
 
-  const saveAssignments = async () => {
+  const allSelectedUserIds = [
+    ...selectedAssistants,
+    ...selectedSurveyors,
+    ...selectedDriverTrucks,
+    ...selectedDriverMachines,
+  ];
+  const usersAlreadyOnOtherSite = allSelectedUserIds
+    .map((userId) => {
+      const a = siteAssignments.find((x) => x.userId === userId && x.siteId !== site.id);
+      if (!a) return null;
+      const otherSite = sites?.find((s) => s.id === a.siteId);
+      const u = users.find((x) => x.id === userId);
+      return { userId, userName: u?.name ?? userId, otherSiteName: otherSite?.name ?? a.siteId };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
+
+  const performSave = async () => {
     try {
-      if (selectedAssistant) {
-        await setSiteAssignment(site.id, { userId: selectedAssistant, role: 'assistant_supervisor', vehicleIds: selectedVehicleIds });
+      const roles = ['assistant_supervisor', 'surveyor', 'driver_truck', 'driver_machine'] as const;
+      const selectedByRole = {
+        assistant_supervisor: selectedAssistants,
+        surveyor: selectedSurveyors,
+        driver_truck: selectedDriverTrucks,
+        driver_machine: selectedDriverMachines,
+      };
+      for (const role of roles) {
+        const currentIds = getAssignedUserIds(role);
+        const newIds = selectedByRole[role];
+        for (const userId of newIds) {
+          await setSiteAssignment(site.id, {
+            userId,
+            role,
+            vehicleIds: role === 'assistant_supervisor' ? selectedVehicleIds : undefined,
+          });
+        }
+        for (const userId of currentIds) {
+          if (!newIds.includes(userId)) {
+            await removeSiteAssignment(site.id, userId);
+          }
+        }
       }
-      if (selectedSurveyor) {
-        await setSiteAssignment(site.id, { userId: selectedSurveyor, role: 'surveyor' });
+      if (!isHeadSupervisor) {
+        for (const driverId of [...selectedDriverTrucks, ...selectedDriverMachines]) {
+          await setDriverVehicleAssignment(site.id, driverId, selectedVehicleIds);
+        }
       }
-      if (selectedDriverTruck) {
-        await setSiteAssignment(site.id, { userId: selectedDriverTruck, role: 'driver_truck' });
-        await setDriverVehicleAssignment(site.id, selectedDriverTruck, selectedVehicleIds);
-      }
-      if (selectedDriverMachine) {
-        await setSiteAssignment(site.id, { userId: selectedDriverMachine, role: 'driver_machine' });
-        await setDriverVehicleAssignment(site.id, selectedDriverMachine, selectedVehicleIds);
-      }
-      const driverIds = [selectedDriverTruck, selectedDriverMachine].filter(Boolean) as string[];
       await updateSite(site.id, {
-        assistantSupervisorId: selectedAssistant ?? undefined,
-        surveyorId: selectedSurveyor ?? undefined,
-        driverIds: driverIds.length ? driverIds : undefined,
+        assistantSupervisorId: selectedAssistants[0] ?? undefined,
+        surveyorId: selectedSurveyors[0] ?? undefined,
+        driverIds: [...selectedDriverTrucks, ...selectedDriverMachines].length
+          ? [...selectedDriverTrucks, ...selectedDriverMachines]
+          : undefined,
         vehicleIds: selectedVehicleIds.length ? selectedVehicleIds : undefined,
       });
       onBack();
-    } catch {
-      Alert.alert(t('alert_error'), t('sites_save_assignments_failed'));
+    } catch (e) {
+      const message = (e instanceof Error ? e.message : null) || t('sites_save_assignments_failed');
+      Alert.alert(t('alert_error'), message);
     }
   };
 
+  const saveAssignments = () => {
+    if (usersAlreadyOnOtherSite.length > 0) {
+      const lines = usersAlreadyOnOtherSite.map(
+        (x) => `${x.userName} ${t('site_already_at')} ${x.otherSiteName}`
+      );
+      Alert.alert(
+        t('site_allocation_caution_title'),
+        t('site_allocation_caution_message').replace('{site}', site.name).replace('{list}', lines.join('\n')),
+        [
+          { text: t('common_cancel'), style: 'cancel' },
+          {
+            text: t('site_move_here'),
+            onPress: async () => {
+              try {
+                for (const { userId } of usersAlreadyOnOtherSite) {
+                  const other = siteAssignments.find((a) => a.userId === userId && a.siteId !== site.id);
+                  if (other) await removeSiteAssignment(other.siteId, userId);
+                }
+                await performSave();
+              } catch (e) {
+                const message = (e instanceof Error ? e.message : null) || t('sites_save_assignments_failed');
+                Alert.alert(t('alert_error'), message);
+              }
+            },
+          },
+        ]
+      );
+      return;
+    }
+    performSave();
+  };
+
+  const toggleSelection = (setter: React.Dispatch<React.SetStateAction<string[]>>, id: string) => {
+    setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
   const toggleVehicle = (vehicleId: string) => {
     setSelectedVehicleIds((prev) =>
       prev.includes(vehicleId) ? prev.filter((id) => id !== vehicleId) : [...prev, vehicleId]
@@ -121,60 +197,60 @@ export function SiteDetailScreen({ site, onBack }: SiteDetailScreenProps) {
             <Text className="text-lg font-bold text-gray-900 mb-2">{t('site_assignments')}</Text>
 
             <Card className="mb-3">
-              <Text className="text-sm text-gray-600 mb-2">{t('site_assistant_supervisor')}</Text>
+              <Text className="text-sm text-gray-600 mb-2">{t('site_assistant_supervisor')} ({t('site_one_or_more')})</Text>
               <View className="flex-row flex-wrap gap-2">
                 {assignableByRole.assistant_supervisor.map((u) => (
                   <Pressable
                     key={u.id}
-                    onPress={() => setSelectedAssistant(selectedAssistant === u.id ? null : u.id)}
-                    className={`px-3 py-2 rounded-lg ${selectedAssistant === u.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    onPress={() => toggleSelection(setSelectedAssistants, u.id)}
+                    className={`px-3 py-2 rounded-lg ${selectedAssistants.includes(u.id) ? 'bg-blue-600' : 'bg-gray-200'}`}
                   >
-                    <Text className={selectedAssistant === u.id ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
+                    <Text className={selectedAssistants.includes(u.id) ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
                   </Pressable>
                 ))}
               </View>
             </Card>
 
             <Card className="mb-3">
-              <Text className="text-sm text-gray-600 mb-2">{t('site_surveyor')}</Text>
+              <Text className="text-sm text-gray-600 mb-2">{t('site_surveyor')} ({t('site_one_or_more')})</Text>
               <View className="flex-row flex-wrap gap-2">
                 {assignableByRole.surveyor.map((u) => (
                   <Pressable
                     key={u.id}
-                    onPress={() => setSelectedSurveyor(selectedSurveyor === u.id ? null : u.id)}
-                    className={`px-3 py-2 rounded-lg ${selectedSurveyor === u.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    onPress={() => toggleSelection(setSelectedSurveyors, u.id)}
+                    className={`px-3 py-2 rounded-lg ${selectedSurveyors.includes(u.id) ? 'bg-blue-600' : 'bg-gray-200'}`}
                   >
-                    <Text className={selectedSurveyor === u.id ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
+                    <Text className={selectedSurveyors.includes(u.id) ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
                   </Pressable>
                 ))}
               </View>
             </Card>
 
             <Card className="mb-3">
-              <Text className="text-sm text-gray-600 mb-2">{t('site_driver_truck')}</Text>
+              <Text className="text-sm text-gray-600 mb-2">{t('site_driver_truck')} ({t('site_one_or_more')})</Text>
               <View className="flex-row flex-wrap gap-2">
                 {assignableByRole.driver_truck.map((u) => (
                   <Pressable
                     key={u.id}
-                    onPress={() => setSelectedDriverTruck(selectedDriverTruck === u.id ? null : u.id)}
-                    className={`px-3 py-2 rounded-lg ${selectedDriverTruck === u.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    onPress={() => toggleSelection(setSelectedDriverTrucks, u.id)}
+                    className={`px-3 py-2 rounded-lg ${selectedDriverTrucks.includes(u.id) ? 'bg-blue-600' : 'bg-gray-200'}`}
                   >
-                    <Text className={selectedDriverTruck === u.id ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
+                    <Text className={selectedDriverTrucks.includes(u.id) ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
                   </Pressable>
                 ))}
               </View>
             </Card>
 
             <Card className="mb-3">
-              <Text className="text-sm text-gray-600 mb-2">{t('site_driver_machine')}</Text>
+              <Text className="text-sm text-gray-600 mb-2">{t('site_driver_machine')} ({t('site_one_or_more')})</Text>
               <View className="flex-row flex-wrap gap-2">
                 {assignableByRole.driver_machine.map((u) => (
                   <Pressable
                     key={u.id}
-                    onPress={() => setSelectedDriverMachine(selectedDriverMachine === u.id ? null : u.id)}
-                    className={`px-3 py-2 rounded-lg ${selectedDriverMachine === u.id ? 'bg-blue-600' : 'bg-gray-200'}`}
+                    onPress={() => toggleSelection(setSelectedDriverMachines, u.id)}
+                    className={`px-3 py-2 rounded-lg ${selectedDriverMachines.includes(u.id) ? 'bg-blue-600' : 'bg-gray-200'}`}
                   >
-                    <Text className={selectedDriverMachine === u.id ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
+                    <Text className={selectedDriverMachines.includes(u.id) ? 'text-white font-medium' : 'text-gray-700'}>{u.name}</Text>
                   </Pressable>
                 ))}
               </View>

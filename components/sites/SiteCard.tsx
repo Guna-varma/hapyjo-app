@@ -15,7 +15,7 @@ interface SiteCardProps {
 
 export function SiteCard({ site, onPress }: SiteCardProps) {
   const { t } = useLocale();
-  const budgetUtilization = (site.spent / site.budget) * 100;
+  const budgetUtilization = site.budget && site.budget > 0 ? (site.spent / site.budget) * 100 : 0;
 
   const statusVariant = {
     active: 'success' as const,
@@ -60,7 +60,7 @@ export function SiteCard({ site, onPress }: SiteCardProps) {
             <View className="flex-row items-center">
               <TrendingUp size={14} color="#10B981" />
               <Text className="text-sm font-semibold text-slate-900 ml-1">
-                {formatAmount(site.spent, true)} ({budgetUtilization.toFixed(0)}%)
+                {formatAmount(site.spent, true)} ({(budgetUtilization ?? 0).toFixed(0)}%)
               </Text>
             </View>
           </View>

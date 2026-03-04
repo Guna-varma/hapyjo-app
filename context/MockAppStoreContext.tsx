@@ -52,7 +52,7 @@ import {
 } from '@/lib/offlineQueue';
 import { generateId } from '@/lib/id';
 import { buildNotificationRows } from '@/lib/notificationScenarios';
-import { showSystemNotification } from '@/lib/localNotifications';
+import { showSystemNotificationWithData } from '@/lib/localNotifications';
 
 export interface MockAppStoreState {
   sites: Site[];
@@ -107,6 +107,7 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   addIssue: (issue: Issue) => Promise<void>;
   updateIssue: (id: string, patch: Partial<Issue>) => Promise<void>;
   setSiteAssignment: (siteId: string, assignment: Partial<SiteAssignment> & { role: string }) => Promise<void>;
+  removeSiteAssignment: (siteId: string, userId: string) => Promise<void>;
   addUser: (user: User) => Promise<void>;
   createUserByOwner: (params: {
     email: string;
@@ -214,7 +215,10 @@ function useSupabaseStore(): MockAppStoreContextValue {
       const tasks = (tasksRes.data ?? []).map((r) => taskFromRow(r as Record<string, unknown>));
       const operations = (operationsRes.data ?? []).map((r) => operationFromRow(r as Record<string, unknown>));
       const reports = (reportsRes.data ?? []).map((r) => reportFromRow(r as Record<string, unknown>));
-      const users = (profilesRes.data ?? []).map((r) => profileFromRow(r as Record<string, unknown>));
+      const profileRows = (profilesRes.data ?? []).filter(
+        (r: Record<string, unknown>) => r.source !== 'umugwaneza'
+      );
+      const users = profileRows.map((r) => profileFromRow(r as Record<string, unknown>));
       const userSiteMap = new Map<string, string[]>();
       siteAssignments.forEach((a) => {
         const arr = userSiteMap.get(a.userId) ?? [];
@@ -299,12 +303,25 @@ function useSupabaseStore(): MockAppStoreContextValue {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
-        (payload: { new: { target_role?: string; title?: string; body?: string } }) => {
+        (payload: {
+          new: {
+            target_role?: string;
+            title?: string;
+            body?: string;
+            link_id?: string;
+            link_type?: string;
+            id?: string;
+          };
+        }) => {
           const record = payload?.new;
           if (!record?.title || !record?.body) return;
           const role = currentUserRoleRef.current;
           if (role && record.target_role === role) {
-            showSystemNotification(String(record.title), String(record.body));
+            showSystemNotificationWithData(String(record.title), String(record.body), {
+              linkId: record.link_id,
+              linkType: record.link_type,
+              notificationId: record.id,
+            });
           }
         }
       )
@@ -370,7 +387,13 @@ function useSupabaseStore(): MockAppStoreContextValue {
 
   const syncFromWebsiteVehicles = useCallback(async (): Promise<{ syncedCount: number }> => {
     const { data, error } = await supabase.rpc('sync_website_vehicles_to_app');
-    if (error) throw error;
+    if (error) {
+      const msg = error.message || '';
+      if (/stack depth|recursion|limit exceeded/i.test(msg)) {
+        throw new Error('Unable to sync vehicles right now (database recursion limit). Ask your admin to run the vehicles sync fix migration in Supabase, then try again.');
+      }
+      throw error;
+    }
     const row = Array.isArray(data) ? data[0] : data;
     const syncedCount = row?.synced_count ?? 0;
     await refetch();
@@ -394,7 +417,8 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, [refetch, state.sites]);
 
   const updateVehicle = useCallback(async (id: string, patch: Partial<Vehicle>) => {
-    const row = vehicleToRow(patch);
+    const { vehicleNumberOrId: _omit, ...patchWithoutNumber } = patch;
+    const row = vehicleToRow(patchWithoutNumber);
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from('vehicles').update(row).eq('id', id);
     if (error) {
@@ -402,7 +426,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       if (/stack depth|recursion|limit exceeded/i.test(msg)) {
         throw new Error('Unable to save vehicle right now. Please try again.');
       }
-      throw error;
+      throw new Error(msg || 'Failed to save vehicle. Please try again.');
     }
     const vehicle = state.vehicles.find((v) => v.id === id);
     if (vehicle) {
@@ -534,12 +558,13 @@ function useSupabaseStore(): MockAppStoreContextValue {
     const row = issueToRow(issue);
     const { error } = await supabase.from('issues').insert(row);
     if (error) throw error;
-    const rows = buildNotificationRows('issue_raised', { ...issue }, () => generateId('n'));
+    const siteName = state.sites.find((s) => s.id === issue.siteId)?.name;
+    const rows = buildNotificationRows('issue_raised', { ...issue, siteName }, () => generateId('n'));
     for (const r of rows) {
       await supabase.from('notifications').insert(r);
     }
     await refetch();
-  }, [refetch]);
+  }, [refetch, state.sites]);
 
   const updateIssue = useCallback(async (id: string, patch: Partial<Issue>) => {
     const row = issueToRow(patch);
@@ -549,12 +574,13 @@ function useSupabaseStore(): MockAppStoreContextValue {
     if (patch.status === 'resolved' || patch.status === 'acknowledged') {
       const issue = state.issues.find((i) => i.id === id);
       if (issue) {
-        const resolvedRows = buildNotificationRows('issue_resolved', { ...issue, ...patch }, () => generateId('n'));
+        const siteName = state.sites.find((s) => s.id === issue.siteId)?.name;
+        const resolvedRows = buildNotificationRows('issue_resolved', { ...issue, ...patch, siteName }, () => generateId('n'));
         for (const r of resolvedRows) await supabase.from('notifications').insert(r);
       }
     }
     await refetch();
-  }, [refetch, state.issues]);
+  }, [refetch, state.issues, state.sites]);
 
   const setSiteAssignment = useCallback(async (siteId: string, assignment: Partial<SiteAssignment> & { role: string }) => {
     const userId = assignment.userId ?? '';
@@ -567,6 +593,12 @@ function useSupabaseStore(): MockAppStoreContextValue {
     for (const r of siteRows) await supabase.from('notifications').insert(r);
     await refetch();
   }, [refetch, state.sites]);
+
+  const removeSiteAssignment = useCallback(async (siteId: string, userId: string) => {
+    const { error } = await supabase.from('site_assignments').delete().eq('site_id', siteId).eq('user_id', userId);
+    if (error) throw error;
+    await refetch();
+  }, [refetch]);
 
   const addUser = useCallback(async (newUser: User) => {
     const row = { id: newUser.id, ...profileToRow(newUser) };
@@ -652,12 +684,16 @@ function useSupabaseStore(): MockAppStoreContextValue {
     const task = state.tasks.find((t) => t.id === id);
     if (task) {
       const siteName = state.sites.find((s) => s.id === (patch.siteId ?? task.siteId))?.name;
+      const merged = { ...task, ...patch, siteName };
       if (patch.status === 'in_progress') {
-        const taskAssignedRows = buildNotificationRows('task_assigned', { ...task, ...patch, siteName }, () => generateId('n'));
+        const taskAssignedRows = buildNotificationRows('task_assigned', merged, () => generateId('n'));
         for (const r of taskAssignedRows) await supabase.from('notifications').insert(r);
       } else if (patch.status === 'completed') {
-        const taskRows = buildNotificationRows('task_completed', { ...task, ...patch, siteName }, () => generateId('n'));
+        const taskRows = buildNotificationRows('task_completed', merged, () => generateId('n'));
         for (const r of taskRows) await supabase.from('notifications').insert(r);
+      } else if (patch.assignedTo !== undefined && Array.isArray(patch.assignedTo) && patch.assignedTo.length > 0) {
+        const taskAssignedRows = buildNotificationRows('task_assigned', merged, () => generateId('n'));
+        for (const r of taskAssignedRows) await supabase.from('notifications').insert(r);
       }
     }
     await refetch();
@@ -730,6 +766,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addIssue,
       updateIssue,
       setSiteAssignment,
+      removeSiteAssignment,
       addUser,
       createUserByOwner,
       resetUserPassword,
@@ -770,6 +807,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addIssue,
       updateIssue,
       setSiteAssignment,
+      removeSiteAssignment,
       addUser,
       createUserByOwner,
       resetUserPassword,

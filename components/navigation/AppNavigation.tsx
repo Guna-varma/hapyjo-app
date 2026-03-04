@@ -5,7 +5,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { useNotificationNavigation } from '@/context/NotificationNavigationContext';
 import { useResponsiveTheme } from '@/theme/responsive';
+import { colors, dimensions } from '@/theme/tokens';
 import { getTabsForRole, type TabId } from '@/lib/rbac';
 import type { SurveyNavParams } from '@/components/RoleBasedDashboard';
 import { RoleBasedDashboard } from '@/components/RoleBasedDashboard';
@@ -80,6 +82,12 @@ export function AppNavigation() {
     setActiveTabState(tab);
   }, []);
 
+  const { registerSetActiveTab } = useNotificationNavigation() ?? {};
+  useEffect(() => {
+    if (!registerSetActiveTab) return;
+    return registerSetActiveTab(setActiveTab);
+  }, [registerSetActiveTab, setActiveTab]);
+
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -151,7 +159,7 @@ export function AppNavigation() {
   const bottomTabPadding = Math.max(theme.tabPaddingV, insets.bottom || 0);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }} edges={['left', 'right']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['left', 'right']}>
       <View style={{ flex: 1, minHeight: 0, paddingTop: topInset }}>
         {/* Compact top bar: Refresh + Language – minimal height, no dead space */}
         <View
@@ -169,34 +177,51 @@ export function AppNavigation() {
           <TouchableOpacity
             onPress={handleRefresh}
             disabled={refreshing || loading}
-            style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, backgroundColor: '#e2e8f0' }}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 8,
+              backgroundColor: 'transparent',
+              minHeight: 44,
+              minWidth: 44,
+            }}
+            accessibilityLabel={t('common_refresh')}
           >
             {refreshing || loading ? (
-              <ActivityIndicator size="small" color="#475569" />
+              <ActivityIndicator size="small" color={colors.primary} />
             ) : (
-              <RefreshCw size={18} color="#475569" />
+              <RefreshCw size={20} color={colors.primary} />
             )}
-            <Text style={{ color: '#475569', fontWeight: '500', fontSize: 11, marginLeft: 4 }}>
+            <Text
+              style={{
+                color: refreshing || loading ? colors.textMuted : colors.primary,
+                fontWeight: '600',
+                fontSize: 14,
+                marginLeft: 6,
+              }}
+            >
               {refreshing || loading ? t('common_loading') : t('common_refresh')}
             </Text>
           </TouchableOpacity>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <TouchableOpacity
               onPress={() => setNotificationsModalVisible(true)}
-              style={{ position: 'relative', padding: 4 }}
+              style={{ position: 'relative', padding: 8, minHeight: dimensions.minTouchHeight, justifyContent: 'center' }}
               accessibilityLabel={t('settings_notifications')}
             >
-              <Bell size={22} color="#475569" />
+              <Bell size={22} color={colors.gray600} />
               {notifications.filter((n) => !n.read).length > 0 && (
-                <View style={{ position: 'absolute', top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#dc2626', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
-                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                <View style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: colors.error, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
+                  <Text style={{ color: colors.surface, fontSize: 10, fontWeight: '700' }}>
                     {notifications.filter((n) => !n.read).length > 99 ? '99+' : notifications.filter((n) => !n.read).length}
                   </Text>
                 </View>
               )}
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleLogout} style={{ padding: 4 }} accessibilityLabel={t('settings_sign_out')}>
-              <LogOut size={22} color="#475569" />
+            <TouchableOpacity onPress={handleLogout} style={{ padding: 8, minHeight: dimensions.minTouchHeight, justifyContent: 'center' }} accessibilityLabel={t('settings_sign_out')}>
+              <LogOut size={22} color={colors.gray600} />
             </TouchableOpacity>
             <LanguageSwitcher />
           </View>
@@ -207,7 +232,7 @@ export function AppNavigation() {
       </View>
 
       {/* Bottom Tab Bar – responsive padding for all Android/iOS device sizes */}
-      <View style={{ backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: 'rgba(226,232,240,0.9)', paddingTop: theme.spacingSm, paddingBottom: bottomTabPadding, paddingHorizontal: theme.tabPaddingH }}>
+      <View style={{ backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: theme.spacingSm, paddingBottom: bottomTabPadding, paddingHorizontal: theme.tabPaddingH }}>
         {footerScrollable ? (
           <ScrollView
             horizontal
@@ -230,15 +255,16 @@ export function AppNavigation() {
                   style={{
                     alignItems: 'center',
                     justifyContent: 'center',
-                    paddingVertical: 6,
+                    paddingVertical: 8,
                     paddingHorizontal: 12,
                     minWidth: theme.tabItemMinWidth,
-                    backgroundColor: isActive ? 'rgba(30, 64, 175, 0.08)' : 'transparent',
+                    minHeight: dimensions.minTouchHeight,
+                    backgroundColor: isActive ? colors.blue50 : 'transparent',
                     borderRadius: 12,
                   }}
                 >
-                  <Icon size={theme.tabIconSize} color={isActive ? '#1E40AF' : '#64748B'} strokeWidth={isActive ? 2.5 : 2} />
-                  <Text style={{ fontSize: theme.tabLabelSize, marginTop: theme.spacingXs, fontWeight: '500', color: isActive ? '#1e3a8a' : '#475569' }}>
+                  <Icon size={theme.tabIconSize} color={isActive ? colors.primary : colors.gray500} strokeWidth={isActive ? 2.5 : 2} />
+                  <Text style={{ fontSize: theme.tabLabelSize, marginTop: theme.spacingXs, fontWeight: '500', color: isActive ? colors.primary : colors.gray600 }}>
                     {tab.label}
                   </Text>
                 </TouchableOpacity>
@@ -265,15 +291,16 @@ export function AppNavigation() {
                   style={{
                     alignItems: 'center',
                     justifyContent: 'center',
-                    paddingVertical: 6,
+                    paddingVertical: 8,
                     paddingHorizontal: 12,
                     minWidth: theme.tabItemMinWidth,
-                    backgroundColor: isActive ? 'rgba(30, 64, 175, 0.08)' : 'transparent',
+                    minHeight: dimensions.minTouchHeight,
+                    backgroundColor: isActive ? colors.blue50 : 'transparent',
                     borderRadius: 12,
                   }}
                 >
-                  <Icon size={theme.tabIconSize} color={isActive ? '#1E40AF' : '#64748B'} strokeWidth={isActive ? 2.5 : 2} />
-                  <Text style={{ fontSize: theme.tabLabelSize, marginTop: theme.spacingXs, fontWeight: '500', color: isActive ? '#1e3a8a' : '#475569' }}>
+                  <Icon size={theme.tabIconSize} color={isActive ? colors.primary : colors.gray500} strokeWidth={isActive ? 2.5 : 2} />
+                  <Text style={{ fontSize: theme.tabLabelSize, marginTop: theme.spacingXs, fontWeight: '500', color: isActive ? colors.primary : colors.gray600 }}>
                     {tab.label}
                   </Text>
                 </TouchableOpacity>

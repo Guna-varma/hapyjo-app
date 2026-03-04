@@ -17,11 +17,13 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
   const theme = useResponsiveTheme();
   const { sites, users, vehicles, siteAssignments, driverVehicleAssignments, setDriverVehicleAssignment, loading } = useMockAppStore();
 
-  // Head supervisor sees all sites; assistant supervisor sees only their sites
-  const mySiteIds =
-    user?.role === 'head_supervisor'
-      ? sites.map((s) => s.id)
-      : sites.filter((s) => s.assistantSupervisorId === user?.id || user?.siteAccess?.includes(s.id)).map((s) => s.id);
+  const mySiteIds = useMemo(
+    () =>
+      user?.role === 'head_supervisor'
+        ? []
+        : sites.filter((s) => s.assistantSupervisorId === user?.id || user?.siteAccess?.includes(s.id)).map((s) => s.id),
+    [sites, user?.id, user?.role]
+  );
 
   const [selectedSiteIndex, setSelectedSiteIndex] = useState(0);
   const siteId = mySiteIds[selectedSiteIndex] ?? mySiteIds[0] ?? sites[0]?.id;
@@ -36,10 +38,14 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
     [vehicles, siteId]
   );
 
-  const siteDrivers = siteAssignments
-    .filter((a) => a.siteId === siteId && (a.role === 'driver_truck' || a.role === 'driver_machine'))
-    .map((a) => users.find((u) => u.id === a.userId))
-    .filter(Boolean) as typeof users;
+  // Only show actual drivers/operators in allocation – exclude owner, admin, head_supervisor, etc.
+  const siteDrivers = useMemo(() => {
+    const assignableRole = (r: string) => r === 'driver_truck' || r === 'driver_machine';
+    return siteAssignments
+      .filter((a) => a.siteId === siteId && assignableRole(a.role))
+      .map((a) => users.find((u) => u.id === a.userId))
+      .filter((u): u is NonNullable<typeof u> => Boolean(u) && assignableRole(u.role));
+  }, [siteId, siteAssignments, users]);
 
   const getAssignedVehicleIds = useCallback(
     (driverId: string) =>
@@ -84,6 +90,17 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
       : [...current, vehicleId];
     setDriverVehicleAssignment(siteId, driverId, next);
   };
+
+  if (user?.role === 'head_supervisor') {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <Header title={t('driver_allocation_title')} leftAction={<PressableScale onPress={onBack}><Text style={{ color: colors.primary, fontWeight: '600' }}>{t('common_back')}</Text></PressableScale>} />
+        <View style={{ padding: spacing.lg }}>
+          <Text style={{ color: colors.textSecondary }}>{t('driver_allocation_only_asst')}</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!site && !loading) {
     return (
@@ -140,7 +157,7 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
           </View>
         )}
 
-        {/* Free vehicles – mandatory to show so head supervisor can see and assign them */}
+        {/* Free vehicles – assign to drivers (truck) or operators (machine) below */}
         <Card className="mb-4 bg-green-50 border border-green-200">
           <Text className="text-sm font-semibold text-green-800 mb-2">{t('vehicles_free')} – {t('driver_allocation_free_vehicles_hint')}</Text>
           {freeVehicles.length === 0 ? (

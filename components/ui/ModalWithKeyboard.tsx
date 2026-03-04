@@ -10,7 +10,9 @@ import {
   useWindowDimensions,
   TouchableWithoutFeedback,
   Keyboard,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '@/theme/tokens';
 
 interface ModalWithKeyboardProps {
@@ -31,6 +33,7 @@ export function ModalWithKeyboard({
   children,
 }: ModalWithKeyboardProps) {
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const maxHeight = height * maxHeightRatio;
 
   return (
@@ -43,9 +46,9 @@ export function ModalWithKeyboard({
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.overlay}>
           <Pressable style={styles.overlayPressable} onPress={Keyboard.dismiss} />
-          <Pressable style={[styles.sheet, { maxHeight }]} onStartShouldSetResponder={() => true}>
+          <Pressable style={[styles.sheet, { height: maxHeight }]} onStartShouldSetResponder={() => true}>
             <KeyboardAvoidingView
-              behavior="padding"
+              behavior={Platform.OS === 'android' ? 'height' : 'padding'}
               style={styles.keyboardView}
             >
               {submitting ? (
@@ -56,12 +59,17 @@ export function ModalWithKeyboard({
                 <>
                   <ScrollView
                     keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
+                    showsVerticalScrollIndicator={true}
                     contentContainerStyle={styles.scrollContent}
+                    style={styles.scrollView}
                   >
                     {children}
                   </ScrollView>
-                  {footer != null ? <View style={styles.footerWrap}>{footer}</View> : null}
+                  {footer != null ? (
+                    <View style={[styles.footerWrap, { paddingBottom: Math.max(spacing.sm, insets.bottom) }]}>
+                      {footer}
+                    </View>
+                  ) : null}
                 </>
               )}
             </KeyboardAvoidingView>
@@ -89,7 +97,12 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   keyboardView: {
-    maxHeight: '100%',
+    flex: 1,
+    minHeight: 0,
+  },
+  scrollView: {
+    flex: 1,
+    minHeight: 0,
   },
   scrollContent: {
     padding: spacing.lg,

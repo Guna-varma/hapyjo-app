@@ -15,9 +15,10 @@ import { modalStyles } from '@/components/ui/modalStyles';
 
 export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const { t, locale, setLocale } = useLocale();
-  const { sites, surveys, expenses, contractRateRwf, setContractRateRwf } = useMockAppStore();
+  const { sites, surveys, expenses, updateSite } = useMockAppStore();
   const [rateModalVisible, setRateModalVisible] = useState(false);
-  const [rateInput, setRateInput] = useState(String(contractRateRwf));
+  const [rateSiteId, setRateSiteId] = useState<string | null>(null);
+  const [rateInput, setRateInput] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
@@ -38,19 +39,33 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   );
   const expensesInRange = useMemo(() => expenses.filter((e) => !e.date || inRange(e.date)), [expenses, inRange]);
 
-  const totalBudget = sites.reduce((sum, site) => sum + site.budget, 0);
-  const totalSpent = sites.reduce((sum, site) => sum + site.spent, 0);
-  const remaining = totalBudget - totalSpent;
+  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
+  const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
+  const remaining = Math.max(0, totalBudget - totalSpent);
   const utilizationRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
-  const workVolume = surveysInRange.reduce((sum, s) => sum + (s.workVolume ?? 0), 0);
-  const revenue = workVolume * contractRateRwf;
+  const revenue = sites.reduce((sum, site) => {
+    const siteVolume = surveysInRange.filter((s) => s.siteId === site.id).reduce((v, s) => v + (s.workVolume ?? 0), 0);
+    return sum + siteVolume * (site.contractRateRwf ?? 0);
+  }, 0);
   const totalCost = expensesInRange.reduce((sum, e) => sum + e.amountRwf, 0);
   const profit = revenue - totalCost;
 
-  const saveContractRate = () => {
+  const hasUnsetContractRates = sites.some((site) => (site.contractRateRwf ?? 0) <= 0);
+
+  const openRateModal = (siteId: string) => {
+    const site = sites.find((s) => s.id === siteId);
+    setRateSiteId(siteId);
+    setRateInput(String(site?.contractRateRwf ?? ''));
+    setRateModalVisible(true);
+  };
+
+  const saveContractRate = async () => {
     const r = parseInt(rateInput, 10);
-    if (!isNaN(r) && r >= 0) setContractRateRwf(r);
-    setRateModalVisible(false);
+    if (rateSiteId != null && !isNaN(r) && r >= 0) {
+      await updateSite(rateSiteId, { contractRateRwf: r });
+      setRateModalVisible(false);
+      setRateSiteId(null);
+    }
   };
 
   return (
@@ -59,10 +74,19 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
         title={t('dashboard_owner_title')}
         subtitle={t('dashboard_owner_subtitle')}
         rightAction={
-          <TouchableOpacity onPress={() => { setRateInput(String(contractRateRwf)); setRateModalVisible(true); }} style={ownerStyles.headerBtn}>
-            <Settings size={18} color="#fff" />
-            <Text style={ownerStyles.headerBtnText}>{t('dashboard_set_contract_rate')}</Text>
-          </TouchableOpacity>
+          sites.length > 0 && hasUnsetContractRates ? (
+            <TouchableOpacity
+              onPress={() => {
+                setRateSiteId(null);
+                setRateInput('');
+                setRateModalVisible(true);
+              }}
+              style={ownerStyles.headerBtn}
+            >
+              <Settings size={18} color="#fff" />
+              <Text style={ownerStyles.headerBtnText}>{t('dashboard_set_contract_rate')}</Text>
+            </TouchableOpacity>
+          ) : null
         }
       />
       <DashboardLayout>
@@ -114,15 +138,25 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
           </Card>
         )}
 
-        {/* Financial Summary hero */}
+        {/* Financial Summary hero – Total Budget = sum of site budgets (set in Sites) */}
         <Card style={ownerStyles.heroCard}>
           <View style={ownerStyles.heroContent}>
             <Text style={ownerStyles.heroLabel}>{t('dashboard_total_investment')}</Text>
+            <Text style={ownerStyles.heroHint}>{t('dashboard_total_budget_hint')}</Text>
             <Text style={ownerStyles.heroValue}>{formatAmount(totalBudget, true)}</Text>
             <View style={ownerStyles.heroRow}>
-              <View><Text style={ownerStyles.heroSmall}>{t('dashboard_spent')}</Text><Text style={ownerStyles.heroNum}>{(totalSpent / 1000000).toFixed(1)}M</Text></View>
-              <View><Text style={ownerStyles.heroSmall}>{t('dashboard_remaining')}</Text><Text style={ownerStyles.heroNum}>{(remaining / 1000000).toFixed(1)}M</Text></View>
-              <View><Text style={ownerStyles.heroSmall}>{t('dashboard_utilization')}</Text><Text style={ownerStyles.heroNum}>{utilizationRate.toFixed(0)}%</Text></View>
+              <View>
+                <Text style={ownerStyles.heroSmall}>{t('dashboard_spent')}</Text>
+                <Text style={ownerStyles.heroNum}>{formatAmount(totalSpent, true)}</Text>
+              </View>
+              <View>
+                <Text style={ownerStyles.heroSmall}>{t('dashboard_remaining')}</Text>
+                <Text style={ownerStyles.heroNum}>{formatAmount(remaining, true)}</Text>
+              </View>
+              <View>
+                <Text style={ownerStyles.heroSmall}>{t('dashboard_utilization')}</Text>
+                <Text style={ownerStyles.heroNum}>{(utilizationRate ?? 0).toFixed(0)}%</Text>
+              </View>
             </View>
           </View>
         </Card>
@@ -152,34 +186,62 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
           </Card>
         </View>
 
-        <Card style={ownerStyles.contractCard}>
-          <Text style={ownerStyles.contractLabel}>{t('dashboard_contract_rate')}</Text>
-          <Text style={ownerStyles.contractValue}>{contractRateRwf.toLocaleString()} RWF per unit volume</Text>
-        </Card>
-
-        <View style={ownerStyles.metricRow}>
-          <Card style={ownerStyles.metricCard}>
-            <View style={ownerStyles.metricContent}>
-              <TrendingUp size={28} color="#10B981" />
-              <Text style={ownerStyles.metricValueLarge}>{sites.filter((s) => s.status === 'active').length}</Text>
-              <Text style={ownerStyles.metricLabel}>{t('dashboard_active_sites')}</Text>
-            </View>
+        {sites.length > 0 && (
+          <Card style={ownerStyles.contractCard}>
+            <Text style={ownerStyles.contractLabel}>{t('dashboard_contract_rate_per_site')}</Text>
+            {sites.map((site) => (
+              <TouchableOpacity
+                key={site.id}
+                onPress={() => openRateModal(site.id)}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingVertical: 8,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                }}
+              >
+                <Text style={ownerStyles.contractSiteName}>{site.name}</Text>
+                <Text style={ownerStyles.contractValue}>{(site.contractRateRwf ?? 0).toLocaleString()} RWF/m³</Text>
+              </TouchableOpacity>
+            ))}
           </Card>
-          <Card style={ownerStyles.metricCard}>
-            <View style={ownerStyles.metricContent}>
-              <PieChart size={28} color="#8B5CF6" />
-              <Text style={ownerStyles.metricValueLarge}>{sites.length ? (sites.reduce((sum, s) => sum + s.progress, 0) / sites.length).toFixed(0) : 0}%</Text>
-              <Text style={ownerStyles.metricLabel}>{t('dashboard_avg_progress')}</Text>
-            </View>
-          </Card>
-        </View>
+        )}
 
-        <View style={ownerStyles.section}>
-          <Text style={ownerStyles.sectionTitle}>{t('dashboard_site_performance')}</Text>
-          {sites.map((site) => (
-            <SiteCard key={site.id} site={site} />
-          ))}
-        </View>
+        {sites.length > 0 ? (
+          <>
+            <View style={ownerStyles.metricRow}>
+              <Card style={ownerStyles.metricCard}>
+                <View style={ownerStyles.metricContent}>
+                  <TrendingUp size={28} color="#10B981" />
+                  <Text style={ownerStyles.metricValueLarge}>{sites.filter((s) => s.status === 'active').length}</Text>
+                  <Text style={ownerStyles.metricLabel}>{t('dashboard_active_sites')}</Text>
+                </View>
+              </Card>
+              <Card style={ownerStyles.metricCard}>
+                <View style={ownerStyles.metricContent}>
+                  <PieChart size={28} color="#8B5CF6" />
+                  <Text style={ownerStyles.metricValueLarge}>
+                    {sites.length ? (sites.reduce((sum, s) => sum + s.progress, 0) / sites.length).toFixed(0) : 0}%
+                  </Text>
+                  <Text style={ownerStyles.metricLabel}>{t('dashboard_avg_progress')}</Text>
+                </View>
+              </Card>
+            </View>
+
+            <View style={ownerStyles.section}>
+              <Text style={ownerStyles.sectionTitle}>{t('dashboard_site_performance')}</Text>
+              {sites.map((site) => (
+                <SiteCard key={site.id} site={site} />
+              ))}
+            </View>
+          </>
+        ) : (
+          <Card style={ownerStyles.contractCard}>
+            <Text style={ownerStyles.contractLabel}>{t('sites_loading')}</Text>
+          </Card>
+        )}
       </DashboardLayout>
 
       <Modal visible={rateModalVisible} transparent animationType="fade">
@@ -187,8 +249,27 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
           <View style={modalStyles.overlayCenter}>
             <Pressable onPress={(e) => e.stopPropagation()} style={modalStyles.sheetCenter}>
               <KeyboardAvoidingView behavior="padding">
-                <Text style={modalStyles.title}>{t('owner_contract_rate_title')}</Text>
-                <Text style={modalStyles.label}>{t('owner_contract_rate_placeholder')}</Text>
+                <Text style={modalStyles.title}>
+                  {rateSiteId ? `${t('owner_contract_rate_for_site')}: ${sites.find((s) => s.id === rateSiteId)?.name ?? ''}` : t('owner_contract_rate_title')}
+                </Text>
+                {!rateSiteId && (
+                  <>
+                    <Text style={modalStyles.label}>{t('owner_contract_rate_select_site')}</Text>
+                    {sites.map((site) => (
+                      <TouchableOpacity
+                        key={site.id}
+                        onPress={() => {
+                          setRateSiteId(site.id);
+                          setRateInput(String(site.contractRateRwf ?? ''));
+                        }}
+                        style={{ paddingVertical: 8 }}
+                      >
+                        <Text style={ownerStyles.contractSiteName}>{site.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+                <Text style={[modalStyles.label, { marginTop: 12 }]}>{t('owner_contract_rate_placeholder')}</Text>
                 <TextInput
                   value={rateInput}
                   onChangeText={setRateInput}
@@ -197,11 +278,38 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
                   style={modalStyles.input}
                   placeholderTextColor={colors.placeholder}
                 />
+                {rateSiteId && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (rateSiteId) {
+                        await updateSite(rateSiteId, { contractRateRwf: null });
+                        setRateInput('');
+                      }
+                    }}
+                    style={{ marginTop: 8 }}
+                  >
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                      {t('owner_contract_rate_reset')}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <View style={modalStyles.footer}>
                   <TouchableOpacity onPress={() => setRateModalVisible(false)} style={[modalStyles.btn, modalStyles.btnSecondary]}>
                     <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={saveContractRate} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
+                  <TouchableOpacity
+                    onPress={saveContractRate}
+                    disabled={rateSiteId == null || rateInput.trim() === '' || isNaN(parseInt(rateInput, 10)) || parseInt(rateInput, 10) < 0}
+                    style={[
+                      modalStyles.btn,
+                      {
+                        backgroundColor:
+                          rateSiteId == null || rateInput.trim() === '' || isNaN(parseInt(rateInput, 10)) || parseInt(rateInput, 10) < 0
+                            ? colors.border
+                            : colors.primary,
+                      },
+                    ]}
+                  >
                     <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_save')}</Text>
                   </TouchableOpacity>
                 </View>
@@ -261,7 +369,8 @@ const ownerStyles = StyleSheet.create({
   quickBtnTextAmber: { color: '#92400e', fontWeight: '500', marginLeft: 8 },
   heroCard: { marginBottom: layout.cardSpacingVertical, backgroundColor: colors.blue600 },
   heroContent: { paddingVertical: layout.grid },
-  heroLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 14, marginBottom: layout.grid },
+  heroLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 14, marginBottom: 2 },
+  heroHint: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginBottom: layout.grid },
   heroValue: { color: '#fff', fontSize: 28, fontWeight: '700', marginBottom: layout.cardPadding },
   heroRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: layout.grid, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.3)' },
   heroSmall: { color: 'rgba(255,255,255,0.8)', fontSize: 12 },
@@ -277,6 +386,7 @@ const ownerStyles = StyleSheet.create({
   metricLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   contractCard: { marginBottom: layout.cardSpacingVertical, backgroundColor: colors.gray100 },
   contractLabel: { fontSize: 14, color: colors.textSecondary },
+  contractSiteName: { fontSize: 14, fontWeight: '600', color: colors.text },
   contractValue: { fontSize: 20, fontWeight: '700', color: colors.text },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', paddingHorizontal: layout.cardPadding },
   modalKAV: { width: '100%' },

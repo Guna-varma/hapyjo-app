@@ -266,7 +266,7 @@ export function siteToRow(s: Partial<Site>): Record<string, unknown> {
   if (s.surveyorId !== undefined) row.surveyor_id = s.surveyorId;
   if (s.driverIds != null) row.driver_ids = s.driverIds;
   if (s.vehicleIds != null) row.vehicle_ids = s.vehicleIds;
-  if (s.contractRateRwf !== undefined) row.contract_rate_rwf = s.contractRateRwf;
+  if (s.contractRateRwf !== undefined) row.contract_rate_rwf = s.contractRateRwf ?? null;
   return row;
 }
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text, TouchableOpacityProps, ActivityIndicator } from 'react-native';
-import { dimensions } from '@/theme/tokens';
+import { colors, dimensions } from '@/theme/tokens';
 
 interface ButtonProps extends TouchableOpacityProps {
   children: React.ReactNode;
@@ -57,7 +57,7 @@ export function Button({
       {...props}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'outline' ? '#2563eb' : '#ffffff'} />
+        <ActivityIndicator color={variant === 'outline' ? colors.primary : colors.surface} />
       ) : (
         <Text className={`font-semibold ${textVariants[variant]} ${textSizes[size]}`}>
           {children}

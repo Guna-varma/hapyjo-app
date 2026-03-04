@@ -1,17 +1,23 @@
-# Vehicles: sync and add-vehicle DB check
+# Vehicles: sync and edit (no in-app add)
+
+## Product behaviour
+
+- **Vehicles are not added in Hapyjo.** They are created on the **Umugwaneza website** and then **synced** into the app. In Hapyjo, users:
+  1. **Sync from website** – pull new vehicles from Umugwaneza into the app.
+  2. **Edit** synced vehicles – add app-specific specs (mileage, tank capacity, fuel balance, health, ideal ranges, etc.) and **assign them to sites**.
 
 ## Sync status (app ↔ Umugwaneza)
 
-- **App → Website:** When you add or update a vehicle in this app, the trigger `tr_sync_vehicle_to_umugwaneza` (migration `20250226110000_vehicles_capacity_and_umugwaneza_sync.sql`) writes to `umugwaneza.vehicles` if the `umugwaneza` schema exists. So vehicles are in sync for the **same Supabase project**.
-- **Website → App:** When the Umugwaneza website updates a vehicle that has `hapyjo_vehicle_id` set, the trigger `tr_sync_vehicle_to_public` updates `public.vehicles`. Site location is managed on the website; you only change it there as needed.
+- **App → Website:** When you **edit** a vehicle in the app (specs, site), the trigger `tr_sync_vehicle_to_umugwaneza` (migration `20250226110000_vehicles_capacity_and_umugwaneza_sync.sql`) writes to `umugwaneza.vehicles` if the `umugwaneza` schema exists. So vehicles are in sync for the **same Supabase project**.
+- **Website → App:** New vehicles on the website (with `hapyjo_vehicle_id` NULL) are imported via **Sync from website** (calls `public.sync_website_vehicles_to_app()`). Existing linked vehicles are updated by the trigger `tr_sync_vehicle_to_public` when the website changes name/type.
 
-## Add vehicle: what the app sends
+## Edit vehicle: what the app sends
 
 - **Free (no site):** `site_id = null`
 - **With site:** `site_id = <site uuid>`
-- **Required:** `id`, `type`, `vehicle_number_or_id`, `tank_capacity_litre`, `fuel_balance_litre` (and for truck: `mileage_km_per_litre`; for machine: `hours_per_litre`)
+- **Editable fields:** `vehicle_number_or_id`, `site_id`, `tank_capacity_litre`, `fuel_balance_litre`, `status`; for truck: `mileage_km_per_litre`, `capacity_tons`, `ideal_consumption_range`, `health_inputs`; for machine: `hours_per_litre`, `ideal_working_range`.
 
-So the **live DB** must allow `vehicles.site_id` to be **NULL** (migration `20250226130000_vehicles_site_optional.sql`). If that migration has not been applied on the remote DB, inserts for “Free (no site)” will fail.
+The **live DB** must allow `vehicles.site_id` to be **NULL** (migration `20250226130000_vehicles_site_optional.sql`) for “Free (no site)” assignment.
 
 ## Check the DB with Supabase
 
@@ -25,7 +31,7 @@ So the **live DB** must allow `vehicles.site_id` to be **NULL** (migration `2025
    - `vehicles` columns and whether `site_id` is nullable
    - RLS policies on `vehicles`
    - Presence of `current_user_role()` and the sync trigger
-4. **If `site_id` is still NOT NULL (or add vehicle fails):** run  
+4. **If `site_id` is still NOT NULL (or sync/edit fails):** run  
    `supabase/scripts/fix_vehicles_site_nullable_live.sql`  
    to make `site_id` nullable and ensure `capacity_tons` and `status` default exist. Safe to run more than once.
 
@@ -50,5 +56,5 @@ If migrations are out of sync, apply the fix script in the Dashboard as in Optio
 
 ## After fixing the DB
 
-- **Add vehicle** should work for both “Free (no site)” and “With site”.
-- If it still fails, the app shows the **exact Supabase error message** in the alert; use that to fix RLS, schema, or permissions.
+- **Sync from website** and **Edit vehicle** should work for both “Free (no site)” and “With site”.
+- If something still fails, the app shows the **exact Supabase error message** in the alert; use that to fix RLS, schema, or permissions.

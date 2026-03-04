@@ -64,7 +64,8 @@ export interface Site {
   surveyorId?: string;
   driverIds?: string[];
   vehicleIds?: string[];
-  contractRateRwf?: number;
+  /** When updating, pass null to clear the rate. */
+  contractRateRwf?: number | null;
 }
 
 export interface Task {
@@ -175,7 +176,7 @@ export interface SiteAssignment {
   vehicleIds?: string[];
 }
 
-/** Assistant Supervisor: which driver is assigned to which vehicle(s) at a site */
+/** Assistant Supervisor: which driver (truck) or operator (machine) is assigned to which vehicle(s) at a site */
 export interface DriverVehicleAssignment {
   siteId: string;
   driverId: string;

@@ -3,11 +3,11 @@ import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { MockAppStoreProvider } from '@/context/MockAppStoreContext';
 import { ToastProvider } from '@/context/ToastContext';
+import { NotificationNavigationProvider } from '@/context/NotificationNavigationContext';
 import { LocaleProvider , useLocale } from '@/context/LocaleContext';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { AppNavigation } from '@/components/navigation/AppNavigation';
 import { PushTokenRegistration } from '@/components/PushTokenRegistration';
-import { DemoNotificationScheduler } from '@/components/DemoNotificationScheduler';
 import { requestNotificationPermissionAsync } from '@/lib/registerPushToken';
 import '../global.css';
 
@@ -66,12 +66,11 @@ function AppContent() {
   }
 
   return (
-    <>
+    <NotificationNavigationProvider>
       <RequestNotificationPermissionWhenAuthenticated />
       <PushTokenRegistration />
-      <DemoNotificationScheduler />
       <AppNavigation />
-    </>
+    </NotificationNavigationProvider>
   );
 }
 

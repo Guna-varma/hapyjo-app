@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Smile } from 'lucide-react-native';
 import { useResponsiveTheme } from '@/theme/responsive';
+import { colors, spacing, typography } from '@/theme/tokens';
 
 interface EmptyStateProps {
   icon?: React.ReactNode;
@@ -13,12 +14,36 @@ export function EmptyState({ icon, title, message }: EmptyStateProps) {
   const theme = useResponsiveTheme();
   const iconSize = theme.scaleMin(48);
   return (
-    <View className="flex-1 items-center justify-center p-8" style={{ padding: theme.spacingLg }}>
-      <View className="items-center">
-        {icon || <Smile size={iconSize} color="#9CA3AF" />}
-        <Text className="text-lg font-semibold text-gray-700 mt-4">{title}</Text>
-        {message && <Text className="text-sm text-gray-500 mt-2 text-center">{message}</Text>}
+    <View style={[styles.container, { padding: theme.spacingLg }]}>
+      <View style={styles.inner}>
+        {icon ?? <Smile size={iconSize} color={colors.textMuted} />}
+        <Text style={styles.title}>{title}</Text>
+        {message != null && <Text style={styles.message}>{message}</Text>}
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inner: {
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: typography.body.fontSize + 2,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: typography.caption.fontSize,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+});

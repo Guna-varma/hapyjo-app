@@ -1,5 +1,7 @@
 # Notification scenarios (end-to-end)
 
+**Notifications are real-time system notifications for every useful interaction.** All scenarios in the table below are wired in the app: each action inserts one notification row per target role into `public.notifications` → Supabase Realtime delivers the INSERT → the app shows a **system notification** for the current user when their role matches `target_role`. Push (Expo) can be sent via the send-push-on-notification Edge Function. No demo or seeded notification rows.
+
 All in-app and push notifications are driven by **pre-made scenarios** in `lib/notificationScenarios.ts`. Each scenario defines:
 
 - **When** it fires (which mutation or event)
@@ -30,7 +32,42 @@ Target roles are chosen so everyone who needs to know gets the notification with
 | **driver_vehicle_assignment** | `setDriverVehicleAssignment` | owner, head_supervisor, assistant_supervisor, driver_truck, driver_machine | site |
 | **machine_session_completed** | `addMachineSession` or `updateMachineSession` (status → completed) | owner, head_supervisor, assistant_supervisor, accountant | machine_session |
 | **task_completed** | `updateTask` (patch status → completed) | owner, head_supervisor, assistant_supervisor | task |
+| **task_assigned** | `updateTask` (assigned_to set or status → in_progress) | owner, head_supervisor, assistant_supervisor, driver_truck, driver_machine | task |
 | **vehicle_added** | `addVehicle` | owner, head_supervisor, assistant_supervisor | vehicle |
+| **vehicle_updated** | `updateVehicle` | owner, head_supervisor, assistant_supervisor, driver_truck, driver_machine | vehicle |
+| **site_added** | `addSite` | admin, owner, head_supervisor, assistant_supervisor | site |
+| **machine_session_started** | `addMachineSession` (status in_progress) | owner, head_supervisor, assistant_supervisor | machine_session |
+
+*`password_reset` has no target roles (reserved for email or in-app only).*
+
+---
+
+## Implementation
+
+The application follows all scenarios above. Each row in the table is implemented in **`context/MockAppStoreContext.tsx`** as follows:
+
+| Scenario | Wired in |
+|----------|----------|
+| issue_raised | `addIssue` — inserts notifications with `siteName` after issue insert |
+| issue_resolved | `updateIssue` — when `status` → resolved or acknowledged |
+| trip_started | `addTrip` (status in_progress), `updateTrip` (status → in_progress) |
+| trip_completed | `addTrip` (status completed), `updateTrip` (status → completed) |
+| expense_added | `addExpense` |
+| survey_submitted | `addSurvey` |
+| survey_approved | `updateSurvey` — when status → approved |
+| report_generated | `addReport` |
+| user_created | `createUserByOwner` (after Edge Function success) |
+| site_assignment | `setSiteAssignment` |
+| driver_vehicle_assignment | `setDriverVehicleAssignment` |
+| machine_session_started | `addMachineSession` (status in_progress) |
+| machine_session_completed | `addMachineSession` (status completed), `updateMachineSession` (status → completed) |
+| task_completed | `updateTask` — when status → completed |
+| task_assigned | `updateTask` — when status → in_progress or `assigned_to` set (non-empty) |
+| vehicle_added | `addVehicle` |
+| vehicle_updated | `updateVehicle` |
+| site_added | `addSite` |
+
+Scenarios are defined in **`lib/notificationScenarios.ts`** (target roles, title/body builders). The same Realtime subscription in `MockAppStoreContext` shows a system notification for the current user whenever a notification row is inserted and `target_role` matches their role.
 
 ---
 
@@ -52,7 +89,7 @@ Use **`supabase/scripts/verify_realtime_notifications.sql`** to check that:
 - `public.push_tokens` exists
 - `public.current_user_role()` exists for RLS
 
-The script does not insert demo data. For **demo notifications** that appear as "just now" in the app, run **`supabase/scripts/seed_demo_notifications_now.sql`** in the SQL Editor; you can run it from time to time to add fresh samples. Real notifications are also created when users perform actions in the app (raise issue, add trip, add expense, etc.).
+The script does not insert any data. Notifications are created when users perform actions in the app (raise issue, add trip, add expense, etc.).
 
 ---
 

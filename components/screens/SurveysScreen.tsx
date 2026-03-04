@@ -254,7 +254,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                   <Text className="text-sm text-gray-600 ml-1">{s.createdAt.slice(0, 10)}</Text>
                 </View>
                 {s.workVolume != null && (
-                  <Text className="text-sm font-medium text-gray-700 mt-1">{t('surveys_total_cubic_m')}: {s.workVolume.toFixed(2)} m³</Text>
+                  <Text className="text-sm font-medium text-gray-700 mt-1">{t('surveys_total_cubic_m')}: {(s.workVolume ?? 0).toFixed(2)} m³</Text>
                 )}
               </Card>
             ))}
@@ -278,7 +278,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                       <Text className="text-sm text-gray-600 ml-1">{s.siteName}</Text>
                     </View>
                     {s.workVolume != null && (
-                      <Text className="text-sm text-gray-700 mb-2">{t('surveys_total_cubic_m')}: {s.workVolume.toFixed(2)} m³</Text>
+                      <Text className="text-sm text-gray-700 mb-2">{t('surveys_total_cubic_m')}: {(s.workVolume ?? 0).toFixed(2)} m³</Text>
                     )}
                     <TouchableOpacity
                       onPress={() => approveSurvey(s.id)}
@@ -309,7 +309,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                   <Text className="text-sm text-gray-600 ml-1">{s.siteName}</Text>
                 </View>
                 {s.workVolume != null && (
-                  <Text className="text-sm text-gray-700">{t('surveys_total_cubic_m')}: {s.workVolume.toFixed(2)} m³</Text>
+                  <Text className="text-sm text-gray-700">{t('surveys_total_cubic_m')}: {(s.workVolume ?? 0).toFixed(2)} m³</Text>
                 )}
               </Card>
             ))}

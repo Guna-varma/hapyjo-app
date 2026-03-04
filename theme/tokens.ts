@@ -22,6 +22,15 @@ export const colors = {
   gray800: '#1e293b',
   blue50: '#eff6ff',
   blue600: '#2563eb',
+  /** Form validation / destructive actions */
+  error: '#dc2626',
+  /** Status chips: success (e.g. approved), warning (e.g. pending) */
+  successBg: '#dcfce7',
+  successText: '#166534',
+  warningBg: '#fef3c7',
+  warningText: '#b45309',
+  dangerBg: '#fee2e2',
+  dangerText: '#b91c1c',
 } as const;
 
 export const dimensions = {

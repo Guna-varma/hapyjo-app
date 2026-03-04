@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
       email,
       password: temporaryPassword,
       email_confirm: true,
-      user_metadata: { role: roleParam, name: name || email.split("@")[0] },
+      user_metadata: { role: roleParam, name: name || email.split("@")[0], source: "hapyjo" },
     });
 
     if (createError) {
@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
         phone: phone ?? null,
         role: roleParam,
         active: true,
+        source: "hapyjo",
       }).eq("id", userId);
 
     let profileError = (await updateProfile()).error;

@@ -23,8 +23,8 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const siteIds = user?.siteAccess ?? [];
-  const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0];
-  const siteTasks = tasks.filter((taskItem) => taskItem.siteId === assignedSite?.id);
+  const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0] ?? null;
+  const siteTasks = assignedSite ? tasks.filter((taskItem) => taskItem.siteId === assignedSite.id) : [];
 
   if (showDriverAllocation) {
     return <DriverAllocationScreen onBack={() => setShowDriverAllocation(false)} />;
@@ -51,13 +51,13 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
               <View>
                 <Text className="text-xs text-gray-600">{t('dashboard_total_investment')}</Text>
                 <Text className="text-sm font-semibold text-slate-900">
-                  {formatAmount(assignedSite.budget, true)}
+                  {formatAmount(assignedSite.budget ?? 0, true)}
                 </Text>
               </View>
               <View>
                 <Text className="text-xs text-slate-600">{t('dashboard_spent')}</Text>
                 <Text className="text-sm font-semibold text-slate-900">
-                  {formatAmount(assignedSite.spent, true)}
+                  {formatAmount(assignedSite.spent ?? 0, true)}
                 </Text>
               </View>
             </View>

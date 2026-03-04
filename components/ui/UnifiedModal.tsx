@@ -12,6 +12,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { colors, spacing } from '@/theme/tokens';
 import { X } from 'lucide-react-native';
@@ -46,10 +47,11 @@ export function UnifiedModal({
   children,
 }: UnifiedModalProps) {
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const maxHeight = height * 0.85;
 
   const content = (
-    <>
+    <View style={styles.contentWrap}>
       {(title != null || showCloseButton) && (
         <View style={styles.headerRow}>
           {title != null && (
@@ -71,21 +73,26 @@ export function UnifiedModal({
       )}
       <ScrollView
         keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
         contentContainerStyle={styles.scrollContent}
+        style={styles.scrollView}
       >
         {children}
       </ScrollView>
-      {footer != null && <View style={modalStyles.footer}>{footer}</View>}
-    </>
+      {footer != null && (
+        <View style={[modalStyles.footer, { paddingBottom: Math.max(spacing.sm, insets.bottom) }]}>
+          {footer}
+        </View>
+      )}
+    </View>
   );
 
   const wrappedContent = keyboardAvoiding ? (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <View style={styles.flex1}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.flex1, { maxHeight }]}
+          behavior={Platform.OS === 'android' ? 'height' : 'padding'}
+          style={styles.flex1}
         >
           {content}
         </KeyboardAvoidingView>
@@ -106,7 +113,7 @@ export function UnifiedModal({
         <Pressable
           style={[
             variant === 'sheet' ? modalStyles.sheet : modalStyles.sheetCenter,
-            variant === 'sheet' && { maxHeight },
+            variant === 'sheet' && { height: maxHeight },
           ]}
           onPress={(e) => e.stopPropagation()}
         >
@@ -118,7 +125,11 @@ export function UnifiedModal({
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1 },
+  flex1: { flex: 1, minHeight: 0 },
+  contentWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -128,6 +139,10 @@ const styles = StyleSheet.create({
   titleWrap: { flex: 1, marginRight: spacing.sm },
   closeBtn: {
     padding: spacing.xs,
+  },
+  scrollView: {
+    flex: 1,
+    minHeight: 0,
   },
   scrollContent: {
     paddingBottom: spacing.md,

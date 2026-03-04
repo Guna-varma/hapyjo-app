@@ -132,7 +132,7 @@ export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
               {survey.workVolume != null && (
                 <View className="bg-blue-50 rounded-lg p-2 mb-2">
                   <Text className="text-sm font-semibold text-gray-900">
-                    {survey.workVolume.toFixed(2)} m³
+                    {(survey.workVolume ?? 0).toFixed(2)} m³
                   </Text>
                   <Text className="text-xs text-gray-600">{t('surveys_work_volume')}</Text>
                 </View>

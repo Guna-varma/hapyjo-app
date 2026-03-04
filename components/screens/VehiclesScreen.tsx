@@ -1,38 +1,41 @@
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  Pressable,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  TouchableWithoutFeedback,
-  Keyboard,
-  RefreshControl,
-} from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, RefreshControl, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { Card } from '@/components/ui/Card';
-import { Header } from '@/components/ui/Header';
-import { modalStyles } from '@/components/ui/modalStyles';
-import { SkeletonList } from '@/components/ui/SkeletonLoader';
+import {
+  Header,
+  SegmentedControl,
+  FilterChips,
+  ListCard,
+  FormModal,
+  Input,
+  ScreenContainer,
+  SkeletonList,
+  EmptyState,
+} from '@/components/ui';
 import { useLocale } from '@/context/LocaleContext';
 import { useAuth } from '@/context/AuthContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
-import { colors } from '@/theme/tokens';
-import { generateId } from '@/lib/id';
+import { colors, radius, spacing } from '@/theme/tokens';
 import type { Vehicle as VehicleType, VehicleType as VType, VehicleStatus } from '@/types';
-import { Truck, Cog, Pencil, CheckCircle, Circle, Download } from 'lucide-react-native';
+import { Pencil, CheckCircle, Circle, Download } from 'lucide-react-native';
 
 type FilterType = 'all' | 'truck' | 'machine';
 type StatusFilter = 'active' | 'all';
 
-const CAN_ADD_VEHICLE_ROLES = ['admin', 'owner', 'head_supervisor'] as const;
+const CAN_SYNC_AND_EDIT_VEHICLE_ROLES = ['admin', 'owner', 'head_supervisor'] as const;
+
+const TYPE_OPTIONS = [
+  { value: 'all' as const, labelKey: 'vehicles_all' },
+  { value: 'truck' as const, labelKey: 'vehicles_trucks' },
+  { value: 'machine' as const, labelKey: 'vehicles_machines' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'active' as const, labelKey: 'vehicles_status_active' },
+  { value: 'all' as const, labelKey: 'vehicles_show_inactive' },
+];
 
 export function VehiclesScreen() {
   const { t } = useLocale();
@@ -42,7 +45,6 @@ export function VehiclesScreen() {
     sites,
     vehicles,
     driverVehicleAssignments,
-    addVehicle,
     updateVehicle,
     refetch,
     syncFromWebsiteVehicles,
@@ -51,10 +53,10 @@ export function VehiclesScreen() {
   const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [syncingFromWebsite, setSyncingFromWebsite] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const [filter, setFilter] = useState<FilterType>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
-  const [addModalVisible, setAddModalVisible] = useState(false);
   const [editVehicle, setEditVehicle] = useState<VehicleType | null>(null);
   const [addType, setAddType] = useState<VType>('truck');
   const [siteId, setSiteId] = useState<string>(sites[0]?.id ?? '');
@@ -69,10 +71,8 @@ export function VehiclesScreen() {
   const [idealConsumptionRange, setIdealConsumptionRange] = useState('');
   const [idealWorkingRange, setIdealWorkingRange] = useState('');
   const [editStatus, setEditStatus] = useState<VehicleStatus>('active');
-  /** Machine: display/edit as L/h (litres per hour). Stored as hours_per_litre = 1/Lh. */
   const [machineLh, setMachineLh] = useState('');
 
-  // Allocated = vehicle id appears in any driver assignment for that site (real-time from driver_vehicle_assignments)
   const allocatedBySite = useMemo(() => {
     const map: Record<string, Set<string>> = {};
     for (const a of driverVehicleAssignments) {
@@ -93,9 +93,7 @@ export function VehiclesScreen() {
       : vehicles;
 
   const filtered =
-    filter === 'all'
-      ? byStatus
-      : byStatus.filter((v) => v.type === filter);
+    filter === 'all' ? byStatus : byStatus.filter((v) => v.type === filter);
 
   const bySite = useMemo(
     () =>
@@ -108,23 +106,11 @@ export function VehiclesScreen() {
     [filtered]
   );
 
-  const canAdd = user && CAN_ADD_VEHICLE_ROLES.includes(user.role as (typeof CAN_ADD_VEHICLE_ROLES)[number]);
-
-  const openAdd = (type: VType) => {
-    setAddType(type);
-    setSiteId(FREE_SITE_KEY);
-    setVehicleNumber('');
-    setMileageKmPerLitre('');
-    setHoursPerLitre('');
-    setMachineLh('');
-    setCapacityTons('');
-    setTankCapacity('');
-    setFuelBalance('0');
-    setHealthInputs('');
-    setIdealConsumptionRange('');
-    setIdealWorkingRange('');
-    setAddModalVisible(true);
-  };
+  const canSyncAndEdit =
+    user &&
+    CAN_SYNC_AND_EDIT_VEHICLE_ROLES.includes(
+      user.role as (typeof CAN_SYNC_AND_EDIT_VEHICLE_ROLES)[number]
+    );
 
   const openEdit = (v: VehicleType) => {
     setEditVehicle(v);
@@ -132,7 +118,9 @@ export function VehiclesScreen() {
     setVehicleNumber(v.vehicleNumberOrId);
     setMileageKmPerLitre(v.mileageKmPerLitre != null ? String(v.mileageKmPerLitre) : '');
     setHoursPerLitre(v.hoursPerLitre != null ? String(v.hoursPerLitre) : '');
-    setMachineLh(v.hoursPerLitre != null && v.hoursPerLitre > 0 ? String(1 / v.hoursPerLitre) : '');
+    setMachineLh(
+      v.hoursPerLitre != null && v.hoursPerLitre > 0 ? String(1 / v.hoursPerLitre) : ''
+    );
     setCapacityTons(v.capacityTons != null ? String(v.capacityTons) : '');
     setTankCapacity(String(v.tankCapacityLitre));
     setFuelBalance(String(v.fuelBalanceLitre));
@@ -143,55 +131,7 @@ export function VehiclesScreen() {
     setAddType(v.type);
   };
 
-  const closeEdit = () => {
-    setEditVehicle(null);
-  };
-
-  const submitAdd = async () => {
-    const capacity = parseFloat(tankCapacity);
-    if (!vehicleNumber.trim() || isNaN(capacity) || capacity <= 0) return;
-    const assignedSiteId = siteId === FREE_SITE_KEY ? undefined : siteId;
-    try {
-      if (addType === 'truck') {
-        const mileage = parseFloat(mileageKmPerLitre);
-        if (isNaN(mileage) || mileage <= 0) return;
-        await addVehicle({
-          id: generateId('v'),
-          siteId: assignedSiteId,
-          type: 'truck',
-          vehicleNumberOrId: vehicleNumber.trim(),
-          mileageKmPerLitre: mileage,
-          capacityTons: capacityTons.trim() ? parseFloat(capacityTons) : undefined,
-          tankCapacityLitre: capacity,
-          fuelBalanceLitre: 0,
-          idealConsumptionRange: idealConsumptionRange.trim() || undefined,
-          healthInputs: healthInputs.trim() || undefined,
-          status: 'active',
-        });
-      } else {
-        const lh = parseFloat(machineLh || hoursPerLitre);
-        if (isNaN(lh) || lh <= 0) return;
-        const hours = 1 / lh;
-        await addVehicle({
-          id: generateId('v'),
-          siteId: assignedSiteId,
-          type: 'machine',
-          vehicleNumberOrId: vehicleNumber.trim(),
-          hoursPerLitre: hours,
-          tankCapacityLitre: capacity,
-          fuelBalanceLitre: 0,
-          idealWorkingRange: idealWorkingRange.trim() || undefined,
-          status: 'active',
-        });
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setAddModalVisible(false);
-      showToast(addType === 'truck' ? t('vehicles_toast_added_truck') : t('vehicles_toast_added_machine'));
-    } catch (e) {
-      const message = (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) || t('vehicles_add_failed');
-      Alert.alert(t('alert_error'), message);
-    }
-  };
+  const closeEdit = () => setEditVehicle(null);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -214,7 +154,9 @@ export function VehiclesScreen() {
         showToast(t('vehicles_sync_toast_count').replace('{{count}}', String(syncedCount)));
       }
     } catch (e) {
-      const message = (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) || t('vehicles_sync_failed');
+      const message =
+        (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) ||
+        t('vehicles_sync_failed');
       showToast(message);
     } finally {
       setSyncingFromWebsite(false);
@@ -225,13 +167,13 @@ export function VehiclesScreen() {
     if (!editVehicle) return;
     const capacity = parseFloat(tankCapacity);
     const balance = parseFloat(fuelBalance);
-    if (!vehicleNumber.trim() || isNaN(capacity) || capacity <= 0) return;
+    if (isNaN(capacity) || capacity <= 0) return;
     if (isNaN(balance) || balance < 0) return;
     const assignedSiteId = siteId === FREE_SITE_KEY ? undefined : siteId;
+    setSubmitting(true);
     try {
       const patch: Partial<VehicleType> = {
         siteId: assignedSiteId,
-        vehicleNumberOrId: vehicleNumber.trim(),
         tankCapacityLitre: capacity,
         fuelBalanceLitre: balance,
         idealConsumptionRange: idealConsumptionRange.trim() || undefined,
@@ -255,411 +197,449 @@ export function VehiclesScreen() {
       closeEdit();
       showToast(t('vehicles_toast_saved'));
     } catch (e) {
-      const message = (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) || t('vehicles_edit_failed');
+      const message =
+        (e && typeof e === 'object' && 'message' in e ? (e as { message: string }).message : null) ||
+        t('vehicles_edit_failed');
       Alert.alert(t('alert_error'), message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const getSiteName = (id: string) =>
     id === FREE_SITE_KEY ? t('vehicles_free_no_site') : (sites.find((s) => s.id === id)?.name ?? id);
 
+  const siteOptions = useMemo(
+    () => [
+      { value: FREE_SITE_KEY, label: t('vehicles_free_no_site') },
+      ...sites.map((s) => ({ value: s.id, label: s.name })),
+    ],
+    [sites, t]
+  );
+
+  const typeSegmentedOptions = useMemo(
+    () =>
+      TYPE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) })),
+    [t]
+  );
+  const statusSegmentedOptions = useMemo(
+    () =>
+      STATUS_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) })),
+    [t]
+  );
+
   return (
-    <View className="flex-1 bg-gray-50">
+    <View style={styles.screen}>
       <Header
         title={t('vehicles_title')}
         subtitle={t('vehicles_subtitle')}
         rightAction={
-          canAdd ? (
-            <View className="flex-row gap-2">
-              <TouchableOpacity
-                onPress={() => openAdd('truck')}
-                className="bg-blue-600 rounded-lg px-3 py-2 flex-row items-center"
-              >
-                <Truck size={18} color="#fff" />
-                <Text className="text-white font-semibold ml-1">{t('vehicles_add_truck')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => openAdd('machine')}
-                className="bg-gray-700 rounded-lg px-3 py-2 flex-row items-center"
-              >
-                <Cog size={18} color="#fff" />
-                <Text className="text-white font-semibold ml-1">{t('vehicles_add_machine')}</Text>
-              </TouchableOpacity>
-            </View>
+          canSyncAndEdit ? (
+            <Pressable
+              onPress={onSyncFromWebsite}
+              disabled={syncingFromWebsite}
+              style={styles.syncBtn}
+            >
+              <Download size={18} color={colors.surface} />
+              <Text style={styles.syncBtnText}>{t('vehicles_sync_from_website')}</Text>
+            </Pressable>
           ) : undefined
         }
       />
 
-      <View className="px-4 py-2 border-b border-gray-200 bg-white">
-        <View className="flex-row mb-2">
-          {(['all', 'truck', 'machine'] as const).map((f) => (
-            <Pressable
-              key={f}
-              onPress={() => setFilter(f)}
-              className={`flex-1 py-2 rounded-lg mx-1 ${filter === f ? 'bg-blue-100' : 'bg-gray-100'}`}
-            >
-              <Text
-                className={`text-center font-medium ${filter === f ? 'text-blue-700' : 'text-gray-600'}`}
-              >
-                {f === 'all' ? t('vehicles_all') : f === 'truck' ? t('vehicles_trucks') : t('vehicles_machines')}
-              </Text>
-            </Pressable>
-          ))}
+      <View style={styles.filterStrip}>
+        <SegmentedControl
+          options={typeSegmentedOptions}
+          value={filter}
+          onChange={(v) => setFilter(v)}
+        />
+        <View style={styles.statusRow}>
+          <SegmentedControl
+            options={statusSegmentedOptions}
+            value={statusFilter}
+            onChange={(v) => setStatusFilter(v)}
+          />
         </View>
-        <View className="flex-row">
-          <Pressable
-            onPress={() => setStatusFilter('active')}
-            className={`flex-1 py-2 rounded-lg mr-1 ${statusFilter === 'active' ? 'bg-green-100' : 'bg-gray-100'}`}
-          >
-            <Text className={`text-center text-sm font-medium ${statusFilter === 'active' ? 'text-green-700' : 'text-gray-600'}`}>
-              {t('vehicles_status_active')}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setStatusFilter('all')}
-            className={`flex-1 py-2 rounded-lg ${statusFilter === 'all' ? 'bg-gray-200' : 'bg-gray-100'}`}
-          >
-            <Text className={`text-center text-sm font-medium ${statusFilter === 'all' ? 'text-gray-700' : 'text-gray-600'}`}>
-              {t('vehicles_show_inactive')}
-            </Text>
-          </Pressable>
-        </View>
-        {canAdd && (
-          <TouchableOpacity
-            onPress={onSyncFromWebsite}
-            disabled={syncingFromWebsite}
-            className="flex-row items-center justify-center gap-2 py-2 mt-2 rounded-lg border border-slate-300 bg-slate-50"
-          >
-            <Download size={16} color="#475569" />
-            <Text className="text-sm font-medium text-slate-600">
-              {syncingFromWebsite ? t('common_loading') : t('vehicles_sync_from_website')}
-            </Text>
-          </TouchableOpacity>
-        )}
       </View>
 
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
+      <ScreenContainer
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+          />
         }
+        contentContainerStyle={{ paddingBottom: theme.spacingXl, flexGrow: 1 }}
       >
         {loading ? (
           <SkeletonList count={6} />
         ) : (
           <>
             {Object.entries(bySite).map(([sid, list]) => (
-              <View key={sid} className="mb-4">
-                <Text className="text-sm font-semibold text-gray-500 mb-2">{getSiteName(sid)}</Text>
+              <View key={sid} style={styles.section}>
+                <Text style={styles.sectionTitle}>{getSiteName(sid)}</Text>
                 {list.map((v) => {
                   const allocated = isAllocated(sid, v.id);
-                  return (
-                    <Pressable key={v.id} onPress={() => openEdit(v)}>
-                      <Card className="mb-2">
-                        <View className="flex-row items-center justify-between">
-                          <View className="flex-1">
-                            <View className="flex-row items-center gap-2 flex-wrap">
-                              <Text className="font-semibold text-gray-900">{v.vehicleNumberOrId}</Text>
-                              <View className={`rounded px-2 py-0.5 ${allocated ? 'bg-amber-100' : 'bg-green-100'}`}>
-                                <Text className={`text-xs font-medium ${allocated ? 'text-amber-800' : 'text-green-800'}`}>
-                                  {allocated ? t('vehicles_allocated') : t('vehicles_free')}
-                                </Text>
-                              </View>
-                              {(v.status ?? 'active') === 'inactive' && (
-                                <View className="rounded px-2 py-0.5 bg-gray-200">
-                                  <Text className="text-xs font-medium text-gray-600">{t('vehicles_status_inactive')}</Text>
-                                </View>
-                              )}
-                              <Pencil size={14} color="#64748b" />
-                            </View>
-                            <Text className="text-xs text-gray-500 capitalize">{v.type}</Text>
-                          </View>
-                          <View className="items-end">
-                            <Text className="text-sm text-gray-700">
-                              Tank: {v.tankCapacityLitre} L · {t('vehicles_fuel_balance_label')}: {v.fuelBalanceLitre} L
-                            </Text>
-                            {v.type === 'truck' && v.mileageKmPerLitre != null && (
-                              <Text className="text-xs text-gray-500">{Number(v.mileageKmPerLitre).toFixed(2)} km/L</Text>
-                            )}
-                            {v.type === 'truck' && v.capacityTons != null && (
-                              <Text className="text-xs text-gray-500">{Number(v.capacityTons).toFixed(1)} t</Text>
-                            )}
-                            {v.type === 'machine' && v.hoursPerLitre != null && v.hoursPerLitre > 0 && (
-                              <Text className="text-xs text-gray-500">{((1 / v.hoursPerLitre)).toFixed(2)} L/h</Text>
-                            )}
-                          </View>
-                        </View>
-                        {(v.healthInputs || v.idealWorkingRange || v.idealConsumptionRange) && (
-                          <View className="mt-2 pt-2 border-t border-gray-100">
-                            {v.type === 'truck' && v.healthInputs && (
-                              <Text className="text-xs text-gray-600">Health: {v.healthInputs}</Text>
-                            )}
-                            {v.type === 'truck' && v.idealConsumptionRange && (
-                              <Text className="text-xs text-gray-600">Ideal range: {v.idealConsumptionRange}</Text>
-                            )}
-                            {v.type === 'machine' && v.idealWorkingRange && (
-                              <Text className="text-xs text-gray-600">Ideal working range: {v.idealWorkingRange}</Text>
-                            )}
-                          </View>
+                  const metaParts = [
+                    `Tank: ${v.tankCapacityLitre} L · ${t('vehicles_fuel_balance_label')}: ${v.fuelBalanceLitre} L`,
+                  ];
+                  if (v.type === 'truck' && v.mileageKmPerLitre != null) {
+                    metaParts.push(`${Number(v.mileageKmPerLitre).toFixed(2)} km/L`);
+                  }
+                  if (v.type === 'truck' && v.capacityTons != null) {
+                    metaParts.push(`${Number(v.capacityTons).toFixed(1)} t`);
+                  }
+                  if (v.type === 'machine' && v.hoursPerLitre != null && v.hoursPerLitre > 0) {
+                    metaParts.push(`${(1 / v.hoursPerLitre).toFixed(2)} L/h`);
+                  }
+                  const footerContent =
+                    v.healthInputs || v.idealWorkingRange || v.idealConsumptionRange ? (
+                      <View>
+                        {v.type === 'truck' && v.healthInputs && (
+                          <Text style={styles.footerText}>Health: {v.healthInputs}</Text>
                         )}
-                      </Card>
-                    </Pressable>
+                        {v.type === 'truck' && v.idealConsumptionRange && (
+                          <Text style={styles.footerText}>Ideal range: {v.idealConsumptionRange}</Text>
+                        )}
+                        {v.type === 'machine' && v.idealWorkingRange && (
+                          <Text style={styles.footerText}>Ideal working range: {v.idealWorkingRange}</Text>
+                        )}
+                      </View>
+                    ) : undefined;
+                  return (
+                    <ListCard
+                      key={v.id}
+                      title={v.vehicleNumberOrId}
+                      subtitle={v.type}
+                      meta={metaParts.join(' · ')}
+                      right={
+                        <View style={styles.badgesRow}>
+                          <View
+                            style={[
+                              styles.badge,
+                              allocated ? styles.badgeAllocated : styles.badgeFree,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                allocated ? styles.badgeTextAllocated : styles.badgeTextFree,
+                              ]}
+                            >
+                              {allocated ? t('vehicles_allocated') : t('vehicles_free')}
+                            </Text>
+                          </View>
+                          {(v.status ?? 'active') === 'inactive' && (
+                            <View style={styles.badgeInactive}>
+                              <Text style={styles.badgeTextInactive}>
+                                {t('vehicles_status_inactive')}
+                              </Text>
+                            </View>
+                          )}
+                          <Pencil size={14} color={colors.textMuted} />
+                        </View>
+                      }
+                      footer={footerContent}
+                      onPress={() => openEdit(v)}
+                    />
                   );
                 })}
               </View>
             ))}
             {filtered.length === 0 && (
-              <Text className="text-gray-500 text-center py-8">{t('vehicles_no_match')}</Text>
+              <EmptyState title={t('vehicles_no_match')} message={t('vehicles_no_match_message')} />
             )}
           </>
         )}
-      </ScrollView>
+      </ScreenContainer>
 
-      {/* Add vehicle modal – unified style, keyboard does not close */}
-      <Modal visible={addModalVisible} transparent animationType="slide">
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={modalStyles.overlay}>
-            <Pressable style={modalStyles.sheet} onPress={(e) => e.stopPropagation()}>
-              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ maxHeight: '100%' }}>
-                <Text style={modalStyles.title}>
-                  {addType === 'truck' ? t('vehicles_add_truck') : t('vehicles_add_machine')}
-                </Text>
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
-              <Text style={modalStyles.label}>{t('vehicles_site_label')} ({t('vehicles_site_optional')})</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12, paddingRight: 4 }}>
-                <Pressable
-                  onPress={() => { Haptics.selectionAsync(); setSiteId(FREE_SITE_KEY); }}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === FREE_SITE_KEY ? colors.primary : colors.gray200 }}
-                >
-                  <Text style={{ color: siteId === FREE_SITE_KEY ? '#fff' : colors.text, fontWeight: '500' }}>{t('vehicles_free_no_site')}</Text>
-                </Pressable>
-                {sites.map((s) => (
-                  <Pressable
-                    key={s.id}
-                    onPress={() => { Haptics.selectionAsync(); setSiteId(s.id); }}
-                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === s.id ? colors.primary : colors.gray200 }}
-                  >
-                    <Text style={{ color: siteId === s.id ? '#fff' : colors.text, fontWeight: '500' }} numberOfLines={1}>{s.name}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={modalStyles.label}>{t('vehicles_vehicle_number_id')}</Text>
-              <TextInput
-                value={vehicleNumber}
-                onChangeText={setVehicleNumber}
-                placeholder={t('vehicles_number_placeholder')}
-                placeholderTextColor={colors.placeholder}
-                keyboardType="default"
-                autoCapitalize="characters"
-                style={[modalStyles.input, { marginBottom: 12 }]}
-              />
-              {addType === 'truck' ? (
-                <>
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_mileage_km_litre')}</Text>
-                  <TextInput
-                    value={mileageKmPerLitre}
-                    onChangeText={setMileageKmPerLitre}
-                    placeholder={t('vehicles_mileage_placeholder')}
-                    keyboardType="decimal-pad"
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_ideal_consumption_optional')}</Text>
-                  <TextInput
-                    value={idealConsumptionRange}
-                    onChangeText={setIdealConsumptionRange}
-                    placeholder={t('vehicles_range_placeholder')}
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_health_optional')}</Text>
-                  <TextInput
-                    value={healthInputs}
-                    onChangeText={setHealthInputs}
-                    placeholder={t('vehicles_health_placeholder')}
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                </>
-              ) : (
-                <>
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_machine_fuel_label')}</Text>
-                  <TextInput
-                    value={machineLh}
-                    onChangeText={(text) => { setMachineLh(text); const n = parseFloat(text); if (!isNaN(n) && n > 0) setHoursPerLitre(String(1 / n)); }}
-                    placeholder="e.g. 5"
-                    keyboardType="decimal-pad"
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_ideal_working_optional')}</Text>
-                  <TextInput
-                    value={idealWorkingRange}
-                    onChangeText={setIdealWorkingRange}
-                    placeholder={t('vehicles_hours_range_placeholder')}
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                </>
-              )}
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_tank_capacity_label')}</Text>
-              <TextInput
-                value={tankCapacity}
-                onChangeText={setTankCapacity}
-                placeholder={t('vehicles_tank_placeholder')}
-                keyboardType="decimal-pad"
-                className="border border-gray-300 rounded-lg px-3 py-2 mb-4 bg-white"
-              />
-                </ScrollView>
-                <View style={modalStyles.footer}>
-                  <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setAddModalVisible(false); }} style={[modalStyles.btn, modalStyles.btnSecondary]}>
-                    <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={submitAdd} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_add')}</Text>
-                  </TouchableOpacity>
-                </View>
-              </KeyboardAvoidingView>
-            </Pressable>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-
-      {/* Edit vehicle modal – unified style */}
-      <Modal visible={!!editVehicle} transparent animationType="slide">
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={modalStyles.overlay}>
-            <Pressable style={modalStyles.sheet} onPress={(e) => e.stopPropagation()}>
-              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ maxHeight: '100%' }}>
-                <Text style={modalStyles.title}>{t('vehicles_edit_title')}</Text>
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_site_label')} ({t('vehicles_site_optional')})</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12, paddingRight: 4 }}>
-                <Pressable
-                  onPress={() => { Haptics.selectionAsync(); setSiteId(FREE_SITE_KEY); }}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === FREE_SITE_KEY ? colors.primary : colors.gray200 }}
-                >
-                  <Text style={{ color: siteId === FREE_SITE_KEY ? '#fff' : colors.text, fontWeight: '500' }}>{t('vehicles_free_no_site')}</Text>
-                </Pressable>
-                {sites.map((s) => (
-                  <Pressable
-                    key={s.id}
-                    onPress={() => { Haptics.selectionAsync(); setSiteId(s.id); }}
-                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: siteId === s.id ? colors.primary : colors.gray200 }}
-                  >
-                    <Text style={{ color: siteId === s.id ? '#fff' : colors.text, fontWeight: '500' }} numberOfLines={1}>{s.name}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={modalStyles.label}>{t('vehicles_vehicle_number_id')}</Text>
-              <TextInput
-                value={vehicleNumber}
-                onChangeText={setVehicleNumber}
-                placeholder={t('vehicles_number_placeholder')}
-                placeholderTextColor={colors.placeholder}
-                keyboardType="default"
-                autoCapitalize="characters"
-                style={[modalStyles.input, { marginBottom: 12 }]}
-              />
-              {addType === 'truck' ? (
-                <>
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_mileage_km_litre')}</Text>
-                  <TextInput
-                    value={mileageKmPerLitre}
-                    onChangeText={setMileageKmPerLitre}
-                    placeholder={t('vehicles_mileage_placeholder')}
-                    keyboardType="decimal-pad"
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_capacity_tons_label')}</Text>
-                  <TextInput
-                    value={capacityTons}
-                    onChangeText={setCapacityTons}
-                    placeholder={t('vehicles_capacity_tons_placeholder')}
-                    keyboardType="decimal-pad"
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_ideal_consumption_optional')}</Text>
-                  <TextInput
-                    value={idealConsumptionRange}
-                    onChangeText={setIdealConsumptionRange}
-                    placeholder={t('vehicles_range_placeholder')}
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_health_optional')}</Text>
-                  <TextInput
-                    value={healthInputs}
-                    onChangeText={setHealthInputs}
-                    placeholder={t('vehicles_health_placeholder')}
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                </>
-              ) : (
-                <>
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_machine_fuel_label')}</Text>
-                  <TextInput
-                    value={machineLh}
-                    onChangeText={(text) => { setMachineLh(text); const n = parseFloat(text); if (!isNaN(n) && n > 0) setHoursPerLitre(String(1 / n)); }}
-                    placeholder="e.g. 5"
-                    keyboardType="decimal-pad"
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                  <Text className="text-sm text-gray-600 mb-1">{t('vehicles_ideal_working_optional')}</Text>
-                  <TextInput
-                    value={idealWorkingRange}
-                    onChangeText={setIdealWorkingRange}
-                    placeholder={t('vehicles_hours_range_placeholder')}
-                    className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-                  />
-                </>
-              )}
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_tank_capacity_label')}</Text>
-              <TextInput
-                value={tankCapacity}
-                onChangeText={setTankCapacity}
-                placeholder={t('vehicles_tank_placeholder')}
-                keyboardType="decimal-pad"
-                className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-              />
-              <Text className="text-sm text-gray-600 mb-1">{t('vehicles_fuel_balance_label')}</Text>
-              <TextInput
-                value={fuelBalance}
-                onChangeText={setFuelBalance}
-                placeholder="0"
-                keyboardType="decimal-pad"
-                className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
-              />
-              <Text className="text-sm text-gray-600 mb-2">{t('vehicles_status_label')}</Text>
-              <View className="flex-row gap-2 mb-4">
-                <Pressable
-                  onPress={() => setEditStatus('active')}
-                  className={`flex-1 flex-row items-center justify-center py-3 rounded-lg border ${editStatus === 'active' ? 'bg-green-100 border-green-500' : 'bg-gray-50 border-gray-200'}`}
-                >
-                  <CheckCircle size={20} color={editStatus === 'active' ? '#059669' : '#94a3b8'} />
-                  <Text className={`ml-2 font-medium ${editStatus === 'active' ? 'text-green-700' : 'text-gray-600'}`}>
-                    {t('vehicles_status_active')}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setEditStatus('inactive')}
-                  className={`flex-1 flex-row items-center justify-center py-3 rounded-lg border ${editStatus === 'inactive' ? 'bg-gray-200 border-gray-500' : 'bg-gray-50 border-gray-200'}`}
-                >
-                  <Circle size={20} color={editStatus === 'inactive' ? '#475569' : '#94a3b8'} />
-                  <Text className={`ml-2 font-medium ${editStatus === 'inactive' ? 'text-gray-700' : 'text-gray-600'}`}>
-                    {t('vehicles_status_inactive')}
-                  </Text>
-                </Pressable>
-              </View>
-                </ScrollView>
-                <View style={modalStyles.footer}>
-                  <TouchableOpacity onPress={() => { Haptics.selectionAsync(); closeEdit(); }} style={[modalStyles.btn, modalStyles.btnSecondary]}>
-                    <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={submitEdit} style={[modalStyles.btn, { backgroundColor: colors.primary }]}>
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>{t('common_save')}</Text>
-                  </TouchableOpacity>
-                </View>
-              </KeyboardAvoidingView>
-            </Pressable>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      <FormModal
+        visible={!!editVehicle}
+        onClose={closeEdit}
+        title={t('vehicles_edit_title')}
+        primaryLabel={t('common_save')}
+        onPrimary={submitEdit}
+        secondaryLabel={t('common_cancel')}
+        submitting={submitting}
+      >
+        <Text style={styles.modalLabel}>
+          {t('vehicles_site_label')} ({t('vehicles_site_optional')})
+        </Text>
+        <FilterChips
+          options={siteOptions}
+          value={siteId}
+          onChange={setSiteId}
+          scroll={false}
+        />
+        <View style={styles.modalChipsMargin} />
+        <Text style={styles.modalLabel}>{t('vehicles_vehicle_number_id')}</Text>
+        <View style={styles.readOnlyField}>
+          <Text style={styles.readOnlyText}>{editVehicle?.vehicleNumberOrId ?? vehicleNumber}</Text>
+        </View>
+        <Text style={styles.readOnlyHint}>{t('vehicles_vehicle_number_readonly_hint')}</Text>
+        {addType === 'truck' ? (
+          <>
+            <Input
+              label={t('vehicles_mileage_km_litre')}
+              value={mileageKmPerLitre}
+              onChangeText={setMileageKmPerLitre}
+              placeholder={t('vehicles_mileage_placeholder')}
+              keyboardType="decimal-pad"
+            />
+            <Input
+              label={t('vehicles_capacity_tons_label')}
+              value={capacityTons}
+              onChangeText={setCapacityTons}
+              placeholder={t('vehicles_capacity_tons_placeholder')}
+              keyboardType="decimal-pad"
+            />
+            <Input
+              label={t('vehicles_ideal_consumption_optional')}
+              value={idealConsumptionRange}
+              onChangeText={setIdealConsumptionRange}
+              placeholder={t('vehicles_range_placeholder')}
+            />
+            <Input
+              label={t('vehicles_health_optional')}
+              value={healthInputs}
+              onChangeText={setHealthInputs}
+              placeholder={t('vehicles_health_placeholder')}
+            />
+          </>
+        ) : (
+          <>
+            <Input
+              label={t('vehicles_machine_fuel_label')}
+              value={machineLh}
+              onChangeText={(text: string) => {
+                setMachineLh(text);
+                const n = parseFloat(text);
+                if (!isNaN(n) && n > 0) setHoursPerLitre(String(1 / n));
+              }}
+              placeholder="e.g. 5"
+              keyboardType="decimal-pad"
+            />
+            <Input
+              label={t('vehicles_ideal_working_optional')}
+              value={idealWorkingRange}
+              onChangeText={setIdealWorkingRange}
+              placeholder={t('vehicles_hours_range_placeholder')}
+            />
+          </>
+        )}
+        <Input
+          label={t('vehicles_tank_capacity_label')}
+          value={tankCapacity}
+          onChangeText={setTankCapacity}
+          placeholder={t('vehicles_tank_placeholder')}
+          keyboardType="decimal-pad"
+        />
+        <Input
+          label={t('vehicles_fuel_balance_label')}
+          value={fuelBalance}
+          onChangeText={setFuelBalance}
+          placeholder="0"
+          keyboardType="decimal-pad"
+        />
+        <Text style={styles.modalLabel}>{t('vehicles_status_label')}</Text>
+        <View style={styles.statusChunks}>
+          <Pressable
+            onPress={() => {
+              Haptics.selectionAsync();
+              setEditStatus('active');
+            }}
+            style={[
+              styles.statusChunk,
+              editStatus === 'active' && styles.statusChunkActive,
+            ]}
+          >
+            <CheckCircle
+              size={20}
+              color={editStatus === 'active' ? colors.primary : colors.textMuted}
+            />
+            <Text
+              style={[
+                styles.statusChunkText,
+                editStatus === 'active' && styles.statusChunkTextActive,
+              ]}
+            >
+              {t('vehicles_status_active')}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.selectionAsync();
+              setEditStatus('inactive');
+            }}
+            style={[
+              styles.statusChunk,
+              editStatus === 'inactive' && styles.statusChunkInactive,
+            ]}
+          >
+            <Circle
+              size={20}
+              color={editStatus === 'inactive' ? colors.gray600 : colors.textMuted}
+            />
+            <Text
+              style={[
+                styles.statusChunkText,
+                editStatus === 'inactive' && styles.statusChunkTextInactive,
+              ]}
+            >
+              {t('vehicles_status_inactive')}
+            </Text>
+          </Pressable>
+        </View>
+      </FormModal>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  filterStrip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  statusRow: {
+    marginTop: spacing.sm,
+  },
+  section: {
+    marginBottom: spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  badge: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  badgeFree: {
+    backgroundColor: colors.blue50,
+  },
+  badgeAllocated: {
+    backgroundColor: colors.gray200,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  badgeTextFree: {
+    color: colors.primary,
+  },
+  badgeTextAllocated: {
+    color: colors.gray700,
+  },
+  badgeInactive: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    backgroundColor: colors.gray200,
+  },
+  badgeTextInactive: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.gray600,
+  },
+  footerText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  syncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gray600,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: 40,
+  },
+  syncBtnText: {
+    color: colors.surface,
+    fontWeight: '600',
+    marginLeft: spacing.xs,
+  },
+  modalLabel: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  modalChipsMargin: {
+    height: spacing.sm,
+  },
+  readOnlyField: {
+    backgroundColor: colors.gray50,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  readOnlyText: {
+    fontSize: 16,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  readOnlyHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  statusChunks: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  statusChunk: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.gray50,
+    minHeight: 48,
+  },
+  statusChunkActive: {
+    backgroundColor: colors.blue50,
+    borderColor: colors.primary,
+  },
+  statusChunkInactive: {
+    backgroundColor: colors.gray200,
+    borderColor: colors.gray500,
+  },
+  statusChunkText: {
+    marginLeft: spacing.sm,
+    fontWeight: '500',
+    color: colors.textSecondary,
+  },
+  statusChunkTextActive: {
+    color: colors.primary,
+  },
+  statusChunkTextInactive: {
+    color: colors.gray700,
+  },
+});

@@ -30,7 +30,7 @@ const POST_NOTIFICATIONS = 'android.permission.POST_NOTIFICATIONS';
 
 /**
  * Request notification permission so real-time system notifications show in the tray.
- * Must ask in BOTH Android Expo Go and real APK so you can demo to the client.
+ * Must ask in BOTH Android Expo Go and real APK so notifications work for the client.
  * Android: Uses PermissionsAndroid so the system "Allow notifications" dialog appears (Expo Go + APK).
  * iOS: expo-notifications (real APK only; skipped in Expo Go to avoid crash).
  */

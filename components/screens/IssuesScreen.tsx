@@ -1,32 +1,39 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
   Pressable,
   Image,
   Alert,
   Keyboard,
+  TouchableOpacity,
+  StyleSheet,
   RefreshControl,
 } from 'react-native';
-import { Card } from '@/components/ui/Card';
-import { Header } from '@/components/ui/Header';
-import { Badge } from '@/components/ui/Badge';
-import { SkeletonList } from '@/components/ui/SkeletonLoader';
+import {
+  Header,
+  FilterChips,
+  ListCard,
+  EmptyState,
+  ScreenContainer,
+  SkeletonList,
+  Badge,
+  ModalWithKeyboard,
+  Button,
+  PressableScale,
+  Input,
+} from '@/components/ui';
+import { modalStyles } from '@/components/ui/modalStyles';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { generateId } from '@/lib/id';
-import { AlertCircle, Plus, MapPin, Calendar } from 'lucide-react-native';
-import { ModalWithKeyboard } from '@/components/ui/ModalWithKeyboard';
-import { Button } from '@/components/ui/Button';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { modalStyles } from '@/components/ui/modalStyles';
-import { colors, radius } from '@/theme/tokens';
+import { AlertCircle, Plus } from 'lucide-react-native';
+import { colors, radius, spacing } from '@/theme/tokens';
+
+const ALL_SITES_VALUE = '';
 
 export function IssuesScreen() {
   const { user } = useAuth();
@@ -36,33 +43,56 @@ export function IssuesScreen() {
   const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [updatingIssueId, setUpdatingIssueId] = useState<string | null>(null);
-  const canRaise = user?.role === 'driver_truck' || user?.role === 'driver_machine' || user?.role === 'assistant_supervisor';
+  const canRaise =
+    user?.role === 'driver_truck' ||
+    user?.role === 'driver_machine' ||
+    user?.role === 'assistant_supervisor';
   const canViewAll = user?.role === 'head_supervisor' || user?.role === 'owner';
   const canUpdateStatus = user?.role === 'head_supervisor' || user?.role === 'owner';
   const thumbnailSize = theme.scaleMin(64);
-  const modalMaxHeight = theme.height * theme.modalMaxHeightRatio;
 
   const [raiseModalVisible, setRaiseModalVisible] = useState(false);
   const [submittingIssue, setSubmittingIssue] = useState(false);
   const [siteId, setSiteId] = useState(sites[0]?.id ?? '');
   const [description, setDescription] = useState('');
-  const [filterSiteId, setFilterSiteId] = useState<string | null>(null);
+  const [filterSiteId, setFilterSiteId] = useState<string>(ALL_SITES_VALUE);
   const [imageUris, setImageUris] = useState<string[]>([]);
 
-  const filteredIssues = filterSiteId ? issues.filter((i) => i.siteId === filterSiteId) : issues;
+  const siteFilterOptions = useMemo(
+    () => [
+      { value: ALL_SITES_VALUE, label: t('reports_all') },
+      ...sites.map((s) => ({ value: s.id, label: s.name })),
+    ],
+    [sites, t]
+  );
+
+  const filteredIssues =
+    filterSiteId === ALL_SITES_VALUE
+      ? issues
+      : issues.filter((i) => i.siteId === filterSiteId);
   const myIssues = !canViewAll ? issues.filter((i) => i.raisedById === user?.id) : undefined;
   const listIssues = canViewAll ? filteredIssues : myIssues ?? [];
 
   const getSiteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
-  const statusVariant = { open: 'warning' as const, acknowledged: 'info' as const, resolved: 'success' as const };
+  const statusVariant = {
+    open: 'warning' as const,
+    acknowledged: 'info' as const,
+    resolved: 'success' as const,
+  };
 
-  const issueStatusOptions: { value: 'open' | 'acknowledged' | 'resolved'; labelKey: string }[] = [
+  const issueStatusOptions: {
+    value: 'open' | 'acknowledged' | 'resolved';
+    labelKey: string;
+  }[] = [
     { value: 'open', labelKey: 'issues_status_open' },
     { value: 'acknowledged', labelKey: 'issues_status_acknowledged' },
     { value: 'resolved', labelKey: 'issues_status_resolved' },
   ];
 
-  const onStatusChange = async (issue: import('@/types').Issue, newStatus: 'open' | 'acknowledged' | 'resolved') => {
+  const onStatusChange = async (
+    issue: import('@/types').Issue,
+    newStatus: 'open' | 'acknowledged' | 'resolved'
+  ) => {
     if (issue.status === newStatus) return;
     setUpdatingIssueId(issue.id);
     try {
@@ -101,14 +131,20 @@ export function IssuesScreen() {
   const addImage = async () => {
     try {
       const { launchImageLibraryAsync } = await import('expo-image-picker');
-      const result = await launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true });
+      const result = await launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+      });
       if (!result.canceled && result.assets?.length) {
         setImageUris((prev) => [...prev, ...result.assets!.map((a) => a.uri)]);
       }
-    } catch { /* user cancelled or picker error */ }
+    } catch {
+      /* user cancelled or picker error */
+    }
   };
 
-  const removeImage = (uri: string) => setImageUris((prev) => prev.filter((u) => u !== uri));
+  const removeImage = (uri: string) =>
+    setImageUris((prev) => prev.filter((u) => u !== uri));
 
   const submitIssue = async () => {
     if (!description.trim() || !siteId || !user?.id) return;
@@ -135,147 +171,175 @@ export function IssuesScreen() {
     }
   };
 
+  const openRaise = () => {
+    setSiteId(sites[0]?.id ?? '');
+    setDescription('');
+    setImageUris([]);
+    setRaiseModalVisible(true);
+  };
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={styles.screen}>
       <Header
         title={t('issues_title')}
         subtitle={canViewAll ? t('issues_subtitle_view') : t('issues_subtitle_raise')}
         rightAction={
           canRaise ? (
-            <TouchableOpacity
-              onPress={() => { setSiteId(sites[0]?.id ?? ''); setDescription(''); setImageUris([]); setRaiseModalVisible(true); }}
-              className="bg-blue-600 rounded-lg px-4 py-2 flex-row items-center"
-            >
+            <Pressable onPress={openRaise} style={styles.raiseBtn}>
               <Plus size={18} color={colors.surface} />
-              <Text className="text-white font-semibold ml-1">{t('issues_raise')}</Text>
-            </TouchableOpacity>
+              <Text style={styles.raiseBtnText}>{t('issues_raise')}</Text>
+            </Pressable>
           ) : null
         }
       />
 
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
+      <ScreenContainer
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+          />
+        }
+        contentContainerStyle={{ paddingBottom: theme.spacingXl, flexGrow: 1 }}
       >
         {loading ? (
           <SkeletonList count={5} />
         ) : (
           <>
-        {canViewAll && sites.length > 1 && (
-          <View className="flex-row flex-wrap gap-2 mb-4">
-            <Pressable
-              onPress={() => setFilterSiteId(null)}
-              className={`px-3 py-2 rounded-lg ${filterSiteId === null ? 'bg-blue-600' : 'bg-gray-200'}`}
-            >
-              <Text className={filterSiteId === null ? 'text-white font-medium' : 'text-gray-700'}>{t('reports_all')}</Text>
-            </Pressable>
-            {sites.map((s) => (
-              <Pressable
-                key={s.id}
-                onPress={() => setFilterSiteId(s.id)}
-                className={`px-3 py-2 rounded-lg ${filterSiteId === s.id ? 'bg-blue-600' : 'bg-gray-200'}`}
-              >
-                <Text className={filterSiteId === s.id ? 'text-white font-medium' : 'text-gray-700'}>{s.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
+            {canViewAll && sites.length > 1 && (
+              <View style={styles.filterWrap}>
+                <FilterChips
+                  options={siteFilterOptions}
+                  value={filterSiteId}
+                  onChange={setFilterSiteId}
+                  scroll={true}
+                />
+              </View>
+            )}
 
-        <Text className="text-lg font-bold text-gray-900 mb-2">{canViewAll ? t('issues_all_issues') : t('issues_my_issues')}</Text>
-        {listIssues.length === 0 && (
-          <Text className="text-gray-500 py-4">{canViewAll ? t('issues_none_reported') : t('issues_none_raised')}</Text>
-        )}
-        {listIssues.map((issue) => (
-          <Card key={issue.id} className="mb-3">
-            <View className="flex-row items-start justify-between mb-2">
-              <Text className="font-semibold text-gray-900 flex-1">{issue.description.slice(0, 60)}{issue.description.length > 60 ? '…' : ''}</Text>
-              {canUpdateStatus ? (
-                <Pressable
-                  onPress={() => openStatusPicker(issue)}
-                  disabled={updatingIssueId === issue.id}
-                  style={({ pressed }) => ({ opacity: pressed || updatingIssueId === issue.id ? 0.7 : 1 })}
-                >
-                  <Badge variant={statusVariant[issue.status]} size="sm">
-                    {t(`issues_status_${issue.status}`)}
-                  </Badge>
-                </Pressable>
-              ) : (
-                <Badge variant={statusVariant[issue.status]} size="sm">{t(`issues_status_${issue.status}`)}</Badge>
-              )}
-            </View>
-            <View className="flex-row items-center mb-1">
-              <MapPin size={14} color="#6B7280" />
-              <Text className="text-sm text-gray-600 ml-1">{issue.siteName ?? getSiteName(issue.siteId)}</Text>
-            </View>
-            <View className="flex-row items-center">
-              <Calendar size={14} color="#6B7280" />
-              <Text className="text-xs text-gray-500 ml-1">{issue.createdAt.slice(0, 10)}</Text>
-            </View>
-            {canUpdateStatus && (
-              <Text className="text-xs text-gray-500 mt-1">{t('issues_tap_status_to_update')}</Text>
+            <Text style={styles.sectionTitle}>
+              {canViewAll ? t('issues_all_issues') : t('issues_my_issues')}
+            </Text>
+            {listIssues.length === 0 ? (
+              <EmptyState
+                title={
+                  canViewAll ? t('issues_none_reported') : t('issues_none_raised')
+                }
+                message={
+                  canViewAll ? t('issues_none_reported_message') : t('issues_none_raised_message')
+                }
+              />
+            ) : (
+              listIssues.map((issue) => (
+                <ListCard
+                  key={issue.id}
+                  title={
+                    issue.description.slice(0, 60) +
+                    (issue.description.length > 60 ? '…' : '')
+                  }
+                  subtitle={issue.siteName ?? getSiteName(issue.siteId)}
+                  meta={`${issue.createdAt.slice(0, 10)}${issue.imageUris.length > 0 ? ` · ${issue.imageUris.length} ${t('issues_images_attached')}` : ''}`}
+                  right={
+                    canUpdateStatus ? (
+                      <Pressable
+                        onPress={() => openStatusPicker(issue)}
+                        disabled={updatingIssueId === issue.id}
+                        style={({ pressed }) => ({
+                          opacity: pressed || updatingIssueId === issue.id ? 0.7 : 1,
+                        })}
+                      >
+                        <Badge variant={statusVariant[issue.status]} size="sm">
+                          {t(`issues_status_${issue.status}`)}
+                        </Badge>
+                      </Pressable>
+                    ) : (
+                      <Badge variant={statusVariant[issue.status]} size="sm">
+                        {t(`issues_status_${issue.status}`)}
+                      </Badge>
+                    )
+                  }
+                  footer={
+                    canUpdateStatus ? (
+                      <Text style={styles.tapHint}>{t('issues_tap_status_to_update')}</Text>
+                    ) : undefined
+                  }
+                />
+              ))
             )}
-            {issue.imageUris.length > 0 && (
-              <Text className="text-xs text-gray-500 mt-1">{issue.imageUris.length} {t('issues_images_attached')}</Text>
-            )}
-          </Card>
-        ))}
           </>
         )}
-      </ScrollView>
+      </ScreenContainer>
 
       <ModalWithKeyboard
         visible={raiseModalVisible}
         onOverlayPress={() => setRaiseModalVisible(false)}
         submitting={submittingIssue}
-        maxHeightRatio={modalMaxHeight / theme.height}
+        maxHeightRatio={theme.modalMaxHeightRatio}
         footer={
           <View style={modalStyles.footer}>
-            <PressableScale onPress={() => setRaiseModalVisible(false)} disabled={submittingIssue} style={[modalStyles.btn, modalStyles.btnSecondary]}>
+            <PressableScale
+              onPress={() => setRaiseModalVisible(false)}
+              disabled={submittingIssue}
+              style={[modalStyles.btn, modalStyles.btnSecondary]}
+            >
               <Text style={modalStyles.btnTextSecondary}>{t('common_cancel')}</Text>
             </PressableScale>
-            <Button variant="primary" onPress={submitIssue} disabled={!description.trim() || submittingIssue} loading={submittingIssue} style={modalStyles.btn}>
+            <Button
+              variant="primary"
+              onPress={submitIssue}
+              disabled={!description.trim() || submittingIssue}
+              loading={submittingIssue}
+              style={modalStyles.btn}
+            >
               {t('issues_raise_submit')}
             </Button>
           </View>
         }
       >
-        <View style={{ alignItems: 'center', marginBottom: 16 }}>
-          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#fef3c7', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
-            <AlertCircle size={24} color="#d97706" />
+        <View style={styles.modalHeader}>
+          <View style={styles.modalIconWrap}>
+            <AlertCircle size={24} color={colors.textSecondary} />
           </View>
-          <Text style={[modalStyles.title, { textAlign: 'center' }]}>{t('issues_raise_modal_title')}</Text>
-          <Text style={{ fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: 4 }}>{t('issues_raise_modal_subtitle')}</Text>
+          <Text style={[modalStyles.title, styles.modalTitleCenter]}>
+            {t('issues_raise_modal_title')}
+          </Text>
+          <Text style={styles.modalSubtitle}>{t('issues_raise_modal_subtitle')}</Text>
         </View>
         <Text style={modalStyles.label}>{t('issues_raise_site_label')}</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          {sites.map((s) => (
-            <Pressable key={s.id} onPress={() => setSiteId(s.id)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, backgroundColor: siteId === s.id ? colors.blue600 : colors.gray200 }}>
-              <Text style={{ color: siteId === s.id ? '#fff' : colors.gray700, fontWeight: '500' }}>{s.name}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={modalStyles.label}>{t('issues_description')}</Text>
-        <TextInput value={description} onChangeText={setDescription} placeholder={t('issues_raise_description_placeholder')} multiline numberOfLines={4} placeholderTextColor={colors.placeholder} style={[modalStyles.input, { minHeight: theme.scale(88) }]} />
-              {imageUris.map((uri) => (
-                <View key={uri} className="relative">
-                  <Image source={{ uri }} className="rounded-lg bg-gray-200" style={{ width: thumbnailSize, height: thumbnailSize }} />
-                  <TouchableOpacity onPress={() => removeImage(uri)} className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 items-center justify-center">
-                    <Text className="text-white text-xs">×</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
+        <FilterChips
+          options={sites.map((s) => ({ value: s.id, label: s.name }))}
+          value={siteId}
+          onChange={setSiteId}
+          scroll={false}
+        />
+        <View style={styles.modalChipsMargin} />
+        <Input
+          label={t('issues_description')}
+          value={description}
+          onChangeText={setDescription}
+          placeholder={t('issues_raise_description_placeholder')}
+          multiline
+          numberOfLines={4}
+          containerStyle={{ marginBottom: spacing.sm }}
+        />
         <Text style={modalStyles.label}>{t('issues_raise_attach_images')}</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          <TouchableOpacity onPress={addImage} style={{ width: 64, height: 64, borderRadius: radius.md, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gray100 }}>
+        <View style={styles.imageRow}>
+          <TouchableOpacity onPress={addImage} style={styles.addImageBtn}>
             <Plus size={24} color={colors.textMuted} />
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{t('common_add')}</Text>
+            <Text style={styles.addImageText}>{t('common_add')}</Text>
           </TouchableOpacity>
           {imageUris.map((uri) => (
-            <View key={uri} style={{ position: 'relative' }}>
-              <Image source={{ uri }} style={{ width: thumbnailSize, height: thumbnailSize, borderRadius: radius.md, backgroundColor: colors.gray200 }} />
-              <TouchableOpacity onPress={() => removeImage(uri)} style={{ position: 'absolute', top: -4, right: -4, width: 20, height: 20, borderRadius: 10, backgroundColor: '#ef4444', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#fff', fontSize: 12 }}>×</Text>
+            <View key={uri} style={styles.thumbWrap}>
+              <Image
+                source={{ uri }}
+                style={[styles.thumb, { width: thumbnailSize, height: thumbnailSize }]}
+              />
+              <TouchableOpacity
+                onPress={() => removeImage(uri)}
+                style={styles.removeThumbBtn}
+              >
+                <Text style={styles.removeThumbText}>×</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -284,3 +348,103 @@ export function IssuesScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  raiseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: 40,
+  },
+  raiseBtnText: {
+    color: colors.surface,
+    fontWeight: '600',
+    marginLeft: spacing.xs,
+  },
+  filterWrap: {
+    marginBottom: spacing.md,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  tapHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  modalIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.gray100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  modalTitleCenter: { textAlign: 'center' },
+  modalSubtitle: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  modalChipsMargin: { height: spacing.sm },
+  imageRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  addImageBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.gray100,
+  },
+  addImageText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  thumbWrap: {
+    position: 'relative',
+  },
+  thumb: {
+    borderRadius: radius.md,
+    backgroundColor: colors.gray200,
+  },
+  removeThumbBtn: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeThumbText: {
+    color: colors.surface,
+    fontSize: 12,
+  },
+});

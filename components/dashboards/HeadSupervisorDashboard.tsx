@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { SiteCard } from '@/components/sites/SiteCard';
@@ -8,23 +8,22 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import { colors, layout } from '@/theme/tokens';
-import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck, UserPlus } from 'lucide-react-native';
+import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck } from 'lucide-react-native';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
-import { DriverAllocationScreen } from '@/components/screens/DriverAllocationScreen';
 
+/** Head Supervisor allocates vehicles to sites (Vehicles tab). Driver/operator assignment is done by Assistant Supervisor only. */
 export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
-  const [showDriverAllocation, setShowDriverAllocation] = useState(false);
   const { t } = useLocale();
-  const { sites, surveys, contractRateRwf } = useMockAppStore();
-
-  if (showDriverAllocation) {
-    return <DriverAllocationScreen onBack={() => setShowDriverAllocation(false)} />;
-  }
-  const totalBudget = sites.reduce((sum, site) => sum + site.budget, 0);
-  const totalSpent = sites.reduce((sum, site) => sum + site.spent, 0);
+  const { sites, surveys } = useMockAppStore();
+  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
+  const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
   const activeSites = sites.filter((s) => s.status === 'active').length;
-  const workVolume = surveys.filter((s) => s.status === 'approved' && s.workVolume != null).reduce((sum, s) => sum + (s.workVolume ?? 0), 0);
-  const revenue = workVolume * contractRateRwf;
+  const revenue = sites.reduce((sum, site) => {
+    const siteVolume = surveys
+      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
+      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+    return sum + siteVolume * (site.contractRateRwf ?? 0);
+  }, 0);
   const profit = revenue - totalSpent;
 
   const stats = [
@@ -46,17 +45,13 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
                 <Truck size={18} color="#0ea5e9" />
                 <Text style={hsStyles.quickBtnText}>{t('tab_vehicles')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowDriverAllocation(true)} style={hsStyles.quickBtn}>
-                <UserPlus size={18} color="#8b5cf6" />
-                <Text style={hsStyles.quickBtnText}>{t('driver_allocation_assign_drivers')}</Text>
+              <TouchableOpacity onPress={() => onNavigateTab('sites')} style={hsStyles.quickBtn}>
+                <Building2 size={18} color="#059669" />
+                <Text style={hsStyles.quickBtnText}>{t('dashboard_all_sites')}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => onNavigateTab('reports')} style={hsStyles.quickBtn}>
                 <FileText size={18} color="#2563eb" />
                 <Text style={hsStyles.quickBtnText}>{t('dashboard_generate_report')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => onNavigateTab('sites')} style={hsStyles.quickBtn}>
-                <Building2 size={18} color="#059669" />
-                <Text style={hsStyles.quickBtnText}>{t('dashboard_all_sites')}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => onNavigateTab('tasks')} style={hsStyles.quickBtn}>
                 <ClipboardCheck size={18} color="#7c3aed" />
@@ -84,12 +79,14 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
             </Card>
           ))}
         </View>
-        <View style={hsStyles.section}>
-          <Text style={hsStyles.sectionTitle}>{t('dashboard_site_locations')}</Text>
-          {sites.map((site) => (
-            <SiteCard key={site.id} site={site} />
-          ))}
-        </View>
+        {sites.length > 0 && (
+          <View style={hsStyles.section}>
+            <Text style={hsStyles.sectionTitle}>{t('dashboard_site_locations')}</Text>
+            {sites.map((site) => (
+              <SiteCard key={site.id} site={site} />
+            ))}
+          </View>
+        )}
       </DashboardLayout>
     </View>
   );
