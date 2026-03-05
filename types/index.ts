@@ -120,6 +120,20 @@ export interface Survey {
 
 export type ExpenseType = 'general' | 'fuel';
 
+/** Type of expense: fuel (set automatically for fuel entries) or one of the general categories. */
+export type ExpenseCategory =
+  | 'fuel'
+  | 'maintenance'
+  | 'spare_parts'
+  | 'operator_wages'
+  | 'labour_cost'
+  | 'machine_rental'
+  | 'vehicle_rental'
+  | 'tools_equipment'
+  | 'food_allowance'
+  | 'office_expense'
+  | 'other';
+
 export interface Expense {
   id: string;
   siteId: string;
@@ -127,6 +141,8 @@ export interface Expense {
   description: string;
   date: string;
   type: ExpenseType;
+  /** Type of expense: 'fuel' for fuel entries, or one of the general categories. */
+  expenseCategory?: ExpenseCategory | null;
   vehicleId?: string;
   litres?: number;
   costPerLitre?: number;

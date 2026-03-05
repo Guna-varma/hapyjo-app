@@ -17,6 +17,8 @@ export { NotificationsModal } from './NotificationsModal';
 export { PressableScale } from './PressableScale';
 export { ProgressBar } from './ProgressBar';
 export { ScreenContainer } from './ScreenContainer';
+export { Select } from './Select';
+export type { SelectOption } from './Select';
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedOption } from './SegmentedControl';
 export { SkeletonCard, SkeletonList } from './SkeletonLoader';

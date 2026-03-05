@@ -96,6 +96,7 @@ export function expenseFromRow(row: Record<string, unknown>): Expense {
     description: String(row.description),
     date: row.date != null ? String(row.date) : '',
     type: row.type as Expense['type'],
+    expenseCategory: row.expense_category != null && row.expense_category !== '' ? (row.expense_category as Expense['expenseCategory']) : undefined,
     vehicleId: row.vehicle_id != null ? String(row.vehicle_id) : undefined,
     litres: row.litres != null ? Number(row.litres) : undefined,
     costPerLitre: row.cost_per_litre != null ? Number(row.cost_per_litre) : undefined,
@@ -336,6 +337,7 @@ export function expenseToRow(e: Partial<Expense>): Record<string, unknown> {
   if (e.description != null) row.description = e.description;
   if (e.date != null) row.date = e.date;
   if (e.type != null) row.type = e.type;
+  if (e.expenseCategory !== undefined && e.expenseCategory != null) row.expense_category = e.expenseCategory;
   if (e.vehicleId !== undefined) row.vehicle_id = e.vehicleId;
   if (e.litres !== undefined) row.litres = e.litres;
   if (e.costPerLitre !== undefined) row.cost_per_litre = e.costPerLitre;

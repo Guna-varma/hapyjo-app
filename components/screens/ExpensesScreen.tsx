@@ -15,6 +15,7 @@ import {
   FormModal,
   Input,
   FilterChips,
+  Select,
   EmptyState,
   DatePickerField,
   InfoButton,
@@ -24,12 +25,27 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useToast } from '@/context/ToastContext';
 import { generateId } from '@/lib/id';
 import { formatAmount, formatPerUnit } from '@/lib/currency';
-import { Banknote, Fuel } from 'lucide-react-native';
+import type { ExpenseCategory } from '@/types';
+import { Banknote, Fuel, Trash2 } from 'lucide-react-native';
 import { colors, layout, form, spacing } from '@/theme/tokens';
+
+/** Categories shown in Add expense (RWF) dropdown only — excludes 'fuel' (set automatically for fuel entries). */
+const GENERAL_EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  'maintenance',
+  'spare_parts',
+  'operator_wages',
+  'labour_cost',
+  'machine_rental',
+  'vehicle_rental',
+  'tools_equipment',
+  'food_allowance',
+  'office_expense',
+  'other',
+];
 
 export function ExpensesScreen() {
   const { t } = useLocale();
-  const { sites, vehicles, expenses, addExpense, refetch } = useMockAppStore();
+  const { sites, vehicles, expenses, addExpense, deleteExpense, refetch } = useMockAppStore();
   const { showToast } = useToast();
   const [generalModalVisible, setGeneralModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -38,6 +54,7 @@ export function ExpensesScreen() {
   const [submittingFuel, setSubmittingFuel] = useState(false);
 
   const [siteId, setSiteId] = useState(sites[0]?.id ?? '');
+  const [expenseCategory, setExpenseCategory] = useState<ExpenseCategory | ''>('');
   const [amountRwf, setAmountRwf] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -46,15 +63,27 @@ export function ExpensesScreen() {
   const [vehicleId, setVehicleId] = useState('');
   const [litres, setLitres] = useState('');
   const [costPerLitre, setCostPerLitre] = useState('');
+  const [filterSiteId, setFilterSiteId] = useState<string>('');
 
   const siteVehicles = vehicles.filter((v) => v.siteId === fuelSiteId);
   const fuelCost = (parseFloat(litres) || 0) * (parseFloat(costPerLitre) || 0);
 
   const submitGeneral = async () => {
     const amount = parseInt(amountRwf, 10);
-    if (!siteId || isNaN(amount) || amount <= 0 || !description.trim()) return;
+    if (!siteId || !siteId.trim()) {
+      showToast(t('expenses_site_required'));
+      return;
+    }
+    if (!expenseCategory || !GENERAL_EXPENSE_CATEGORIES.includes(expenseCategory as ExpenseCategory)) {
+      showToast(t('expenses_category_required'));
+      return;
+    }
+    if (isNaN(amount) || amount <= 0 || !description.trim()) return;
     const site = sites.find((s) => s.id === siteId);
-    if (!site) return;
+    if (!site) {
+      showToast(t('expenses_site_required'));
+      return;
+    }
     setSubmittingGeneral(true);
     try {
       await addExpense({
@@ -64,10 +93,12 @@ export function ExpensesScreen() {
         description: description.trim(),
         date,
         type: 'general',
+        expenseCategory: expenseCategory as ExpenseCategory,
         createdAt: new Date().toISOString(),
       });
       setGeneralModalVisible(false);
       setAmountRwf('');
+      setExpenseCategory('');
       setDescription('');
       showToast(t('expenses_toast_added'));
     } catch {
@@ -80,10 +111,17 @@ export function ExpensesScreen() {
   const submitFuel = async () => {
     const l = parseFloat(litres);
     const cpl = parseFloat(costPerLitre);
-    if (!fuelSiteId || !vehicleId || isNaN(l) || l <= 0 || isNaN(cpl) || cpl <= 0) return;
+    if (!fuelSiteId || !fuelSiteId.trim()) {
+      showToast(t('expenses_site_required'));
+      return;
+    }
+    if (!vehicleId || isNaN(l) || l <= 0 || isNaN(cpl) || cpl <= 0) return;
     const site = sites.find((s) => s.id === fuelSiteId);
     const vehicle = vehicles.find((v) => v.id === vehicleId);
-    if (!site || !vehicle) return;
+    if (!site || !vehicle) {
+      showToast(t('expenses_site_required'));
+      return;
+    }
     const totalCost = Math.round(l * cpl);
     setSubmittingFuel(true);
     try {
@@ -94,6 +132,7 @@ export function ExpensesScreen() {
         description: `Fuel ${vehicle.vehicleNumberOrId}`,
         date: new Date().toISOString().slice(0, 10),
         type: 'fuel',
+        expenseCategory: 'fuel',
         vehicleId,
         litres: l,
         costPerLitre: cpl,
@@ -122,9 +161,12 @@ export function ExpensesScreen() {
   };
 
   const getSiteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
+  const getExpenseCategoryLabel = (cat: ExpenseCategory | undefined | null): string =>
+    cat ? t(`expenses_category_${cat}` as 'expenses_category_maintenance') : '';
 
   const openGeneral = () => {
     setSiteId(sites[0]?.id ?? '');
+    setExpenseCategory(GENERAL_EXPENSE_CATEGORIES[0]);
     setAmountRwf('');
     setDescription('');
     setDate(new Date().toISOString().slice(0, 10));
@@ -139,11 +181,40 @@ export function ExpensesScreen() {
     setFuelModalVisible(true);
   };
 
+  const handleDeleteExpense = (e: { id: string; description: string; amountRwf: number }) => {
+    Alert.alert(
+      t('expenses_delete_confirm'),
+      `${e.description}\n${formatAmount(e.amountRwf)}`,
+      [
+        { text: t('common_cancel'), style: 'cancel' },
+        {
+          text: t('expenses_delete_button'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteExpense(e.id);
+              showToast(t('expenses_deleted'));
+            } catch {
+              Alert.alert(t('alert_error'), t('expenses_delete_failed'));
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const siteOptions = sites.map((s) => ({ value: s.id, label: s.name }));
-  const vehicleOptions = siteVehicles.map((v) => ({
-    value: v.id,
-    label: v.vehicleNumberOrId,
-  }));
+  const filterSiteOptions = [{ value: '', label: t('expenses_filter_all_sites') }, ...siteOptions];
+  const expensesToShow = filterSiteId
+    ? expenses.filter((e) => e.siteId === filterSiteId)
+    : expenses;
+
+  const truckOptions = siteVehicles
+    .filter((v) => v.type === 'truck')
+    .map((v) => ({ value: v.id, label: v.vehicleNumberOrId }));
+  const machineOptions = siteVehicles
+    .filter((v) => v.type === 'machine')
+    .map((v) => ({ value: v.id, label: v.vehicleNumberOrId }));
 
   return (
     <View style={styles.screen}>
@@ -174,20 +245,32 @@ export function ExpensesScreen() {
           </Pressable>
         </View>
 
+        <Text style={styles.sectionTitle}>{t('expenses_filter_by_site')}</Text>
+        <FilterChips options={filterSiteOptions} value={filterSiteId} onChange={setFilterSiteId} scroll={false} />
         <Text style={styles.sectionTitle}>{t('expenses_recent')}</Text>
-        {expenses.length === 0 ? (
+        {expensesToShow.length === 0 ? (
           <EmptyState title={t('expenses_empty')} message={t('expenses_empty_message')} />
         ) : (
-          expenses
+          expensesToShow
             .slice(-20)
             .reverse()
             .map((e) => (
               <ListCard
                 key={e.id}
                 title={e.description}
-                meta={`${getSiteName(e.siteId)} · ${e.date}${e.type === 'fuel' && e.litres != null ? ` · ${e.litres} L @ ${e.costPerLitre} ${formatPerUnit('L')}` : ''}`}
+                meta={`${getSiteName(e.siteId)} · ${e.date}${e.expenseCategory ? ` · ${getExpenseCategoryLabel(e.expenseCategory)}` : ''}${e.type === 'fuel' && e.litres != null ? ` · ${e.litres} L @ ${e.costPerLitre} ${formatPerUnit('L')}` : ''}`}
                 right={
-                  <Text style={styles.listAmount}>{formatAmount(e.amountRwf)}</Text>
+                  <View style={styles.expenseRowRight}>
+                    <Text style={styles.listAmount}>{formatAmount(e.amountRwf)}</Text>
+                    <Pressable
+                      onPress={() => handleDeleteExpense(e)}
+                      style={styles.deleteExpenseBtn}
+                      hitSlop={8}
+                      accessibilityLabel={t('expenses_delete_button')}
+                    >
+                      <Trash2 size={20} color={colors.error} />
+                    </Pressable>
+                  </View>
                 }
               />
             ))
@@ -205,6 +288,16 @@ export function ExpensesScreen() {
       >
         <Text style={styles.modalLabel}>{t('expenses_site_star')}</Text>
         <FilterChips options={siteOptions} value={siteId} onChange={setSiteId} scroll={false} />
+        <Select
+          label={t('expenses_type_of_expense')}
+          placeholder={t('expenses_type_placeholder')}
+          options={GENERAL_EXPENSE_CATEGORIES.map((c) => ({
+            value: c,
+            label: t(`expenses_category_${c}` as const),
+          }))}
+          value={expenseCategory}
+          onChange={(v) => setExpenseCategory(v as ExpenseCategory)}
+        />
         <View style={styles.labelRow}>
           <Text style={styles.modalLabel}>Amount (RWF) *</Text>
           <InfoButton
@@ -255,12 +348,41 @@ export function ExpensesScreen() {
           scroll={false}
         />
         <Text style={styles.modalLabel}>{t('expenses_vehicle_star')}</Text>
-        <FilterChips
-          options={vehicleOptions}
-          value={vehicleId}
-          onChange={setVehicleId}
-          scroll={false}
-        />
+        <Text style={styles.vehicleHint}>{t('expenses_vehicle_type_hint')}</Text>
+        {truckOptions.length > 0 && (
+          <>
+            <Text style={styles.vehicleSectionLabel}>{t('site_vehicle_type_truck')}</Text>
+            <FilterChips options={truckOptions} value={vehicleId} onChange={setVehicleId} scroll={false} />
+          </>
+        )}
+        {machineOptions.length > 0 && (
+          <>
+            <Text style={styles.vehicleSectionLabel}>{t('site_vehicle_type_machine')}</Text>
+            <FilterChips options={machineOptions} value={vehicleId} onChange={setVehicleId} scroll={false} />
+          </>
+        )}
+        {vehicleId && (() => {
+          const sel = siteVehicles.find((x) => x.id === vehicleId);
+          if (!sel) return null;
+          const approxL = sel.fuelBalanceLitre ?? 0;
+          const truckKm = sel.type === 'truck' && (sel.mileageKmPerLitre ?? 0) > 0 ? approxL * (sel.mileageKmPerLitre ?? 0) : null;
+          const machineHrs = sel.type === 'machine' && (sel.hoursPerLitre ?? 0) > 0 ? approxL / (sel.hoursPerLitre ?? 0) : null;
+          return (
+            <View style={styles.approxFuelBlock}>
+              <Text style={styles.approxFuelLabel}>{t('expenses_approx_fuel_available')}: {approxL.toFixed(1)} L</Text>
+              {truckKm != null && (
+                <Text style={styles.approxFuelDerived}>
+                  {t('expenses_approx_km_truck').replace('{km}', truckKm.toFixed(0))}
+                </Text>
+              )}
+              {machineHrs != null && (
+                <Text style={styles.approxFuelDerived}>
+                  {t('expenses_approx_hours_machine').replace('{hours}', machineHrs.toFixed(1))}
+                </Text>
+              )}
+            </View>
+          );
+        })()}
         <Input
           label={t('expenses_litres_star')}
           value={litres}
@@ -331,11 +453,57 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
   },
+  expenseRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  deleteExpenseBtn: {
+    padding: spacing.xs,
+  },
   modalLabel: {
     fontSize: 14,
     color: colors.textSecondary,
     marginBottom: spacing.xs,
     marginTop: spacing.sm,
+  },
+  vehicleHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+    fontStyle: 'italic',
+  },
+  vehicleSectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  approxFuelBlock: {
+    backgroundColor: colors.gray100,
+    borderRadius: layout.cardRadius,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  approxFuelLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  approxFuelNote: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  approxFuelDerived: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
   },
   labelRow: {
     flexDirection: 'row',

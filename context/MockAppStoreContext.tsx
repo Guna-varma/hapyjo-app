@@ -102,6 +102,7 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   addVehicle: (vehicle: Vehicle) => Promise<void>;
   updateVehicle: (id: string, patch: Partial<Vehicle>) => Promise<void>;
   addExpense: (expense: Expense) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
   addTrip: (trip: Trip) => Promise<void>;
   updateTrip: (id: string, patch: Partial<Trip>) => Promise<void>;
   addMachineSession: (session: MachineSession) => Promise<void>;
@@ -502,7 +503,10 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, [state.vehicles, state.sites]);
 
   const addExpense = useCallback(async (expense: Expense) => {
+    const siteId = expense.siteId != null ? String(expense.siteId).trim() : '';
+    if (!siteId) throw new Error('Site location is required for every expense (general and fuel).');
     const row = expenseToRow(expense);
+    if (!row.site_id) throw new Error('Site location is required for every expense.');
     const { error } = await supabase.from('expenses').insert(row);
     if (error) {
       await appendToOfflineQueue({ type: 'expense', payload: expense as unknown as Record<string, unknown> });
@@ -514,6 +518,12 @@ function useSupabaseStore(): MockAppStoreContextValue {
     for (const r of expenseRows) await supabase.from('notifications').insert(r);
     await refetch();
   }, [refetch, state.sites]);
+
+  const deleteExpense = useCallback(async (id: string) => {
+    const { error } = await supabase.from('expenses').delete().eq('id', id);
+    if (error) throw new Error(error.message || 'Failed to delete expense.');
+    setState((prev) => ({ ...prev, expenses: prev.expenses.filter((e) => e.id !== id) }));
+  }, []);
 
   const addTrip = useCallback(async (trip: Trip) => {
     const row = tripToRow(trip);
@@ -843,6 +853,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addVehicle,
       updateVehicle,
       addExpense,
+      deleteExpense,
       addTrip,
       updateTrip,
       addMachineSession,
@@ -885,6 +896,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addVehicle,
       updateVehicle,
       addExpense,
+      deleteExpense,
       addTrip,
       updateTrip,
       addMachineSession,
