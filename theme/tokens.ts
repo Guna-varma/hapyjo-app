@@ -3,6 +3,8 @@
  * Use these for consistent styling across the app.
  */
 
+import { Platform } from 'react-native';
+
 export const colors = {
   background: '#f8fafc',
   surface: '#ffffff',
@@ -65,21 +67,29 @@ export const layout = {
   minTouchHeight: 48,
 } as const;
 
-/** Form consistency: input radius 8px, padding 12px, label 14px, button height 48px */
+/** Form consistency: input radius 8px, padding 12px, label 14px, button height 48px. inputFontSize 16 prevents iOS zoom. */
 export const form = {
   inputRadius: 8,
   inputPadding: 12,
   labelFontSize: 14,
   buttonHeight: 48,
+  /** 48–52px for touch-friendly inputs */
+  inputMinHeight: 48,
+  inputMaxHeight: 52,
+  /** 16px minimum prevents iOS zoom on focus */
+  inputFontSize: 16,
 } as const;
 
-/** Uniform card shadow */
-export const cardShadow = {
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.08,
-  shadowRadius: 4,
-  elevation: 2,
-} as const;
+/** Uniform card shadow (boxShadow on web to avoid deprecated shadow* props). */
+export const cardShadow = Platform.select({
+  web: { boxShadow: '0 2px 4px rgba(0,0,0,0.08)' as const },
+  default: {
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+})!;
 
 export const typography = {
   body: { fontSize: 15 },

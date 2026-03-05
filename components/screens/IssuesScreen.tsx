@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
+  Modal,
+  Linking,
+  Platform,
+  ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Header,
@@ -43,12 +48,14 @@ export function IssuesScreen() {
   const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [updatingIssueId, setUpdatingIssueId] = useState<string | null>(null);
+  /** Add issue: only Asst Supervisor, Surveyor, Driver, Operator. Head supervisor / owner / admin cannot add. */
   const canRaise =
     user?.role === 'driver_truck' ||
     user?.role === 'driver_machine' ||
-    user?.role === 'assistant_supervisor';
-  const canViewAll = user?.role === 'head_supervisor' || user?.role === 'owner';
-  const canUpdateStatus = user?.role === 'head_supervisor' || user?.role === 'owner';
+    user?.role === 'assistant_supervisor' ||
+    user?.role === 'surveyor';
+  const canViewAll = user?.role === 'head_supervisor' || user?.role === 'owner' || user?.role === 'admin';
+  const canUpdateStatus = user?.role === 'head_supervisor' || user?.role === 'owner' || user?.role === 'admin';
   const thumbnailSize = theme.scaleMin(64);
 
   const [raiseModalVisible, setRaiseModalVisible] = useState(false);
@@ -57,6 +64,8 @@ export function IssuesScreen() {
   const [description, setDescription] = useState('');
   const [filterSiteId, setFilterSiteId] = useState<string>(ALL_SITES_VALUE);
   const [imageUris, setImageUris] = useState<string[]>([]);
+  const [viewingImageUri, setViewingImageUri] = useState<string | null>(null);
+  const [selectedIssue, setSelectedIssue] = useState<import('@/types').Issue | null>(null);
 
   const siteFilterOptions = useMemo(
     () => [
@@ -106,6 +115,7 @@ export function IssuesScreen() {
   };
 
   const openStatusPicker = (issue: import('@/types').Issue) => {
+    if (!canUpdateStatus) return;
     Alert.alert(
       t('issues_update_status'),
       issue.description.slice(0, 80) + (issue.description.length > 80 ? '…' : ''),
@@ -118,6 +128,69 @@ export function IssuesScreen() {
       ]
     );
   };
+
+  const openIssueDetail = (issue: import('@/types').Issue) => {
+    setSelectedIssue(issue);
+  };
+
+  const closeIssueDetail = () => setSelectedIssue(null);
+
+  const handleDownloadImage = useCallback(
+    async (uri: string) => {
+      try {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          const a = document.createElement('a');
+          a.href = uri;
+          a.download = `issue-image-${Date.now()}.jpg`;
+          a.rel = 'noopener noreferrer';
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast(t('issues_image_saved'));
+        } else {
+          const { documentDirectory, cacheDirectory, writeAsStringAsync, EncodingType } =
+            await import('expo-file-system/legacy');
+          const FileSystem = await import('expo-file-system');
+          const Sharing = await import('expo-sharing');
+          const isAvailable = await Sharing.isAvailableAsync();
+          const ext = uri.startsWith('data:image/png') ? 'png' : 'jpg';
+          const filename = `issue-image-${Date.now()}.${ext}`;
+          const dir = documentDirectory ?? cacheDirectory ?? '';
+          const path = `${dir}${filename}`;
+
+          if (uri.startsWith('data:')) {
+            const base64Match = uri.match(/^data:image\/\w+;base64,(.+)$/);
+            if (base64Match?.[1]) {
+              await writeAsStringAsync(path, base64Match[1], { encoding: EncodingType.Base64 });
+            } else {
+              const canOpen = await Linking.canOpenURL(uri);
+              if (canOpen) await Linking.openURL(uri);
+              return;
+            }
+          } else {
+            const fs = (FileSystem as { default?: { downloadAsync: (uri: string, path: string) => Promise<{ uri: string }> } }).default;
+            if (fs?.downloadAsync) await fs.downloadAsync(uri, path);
+            else await Linking.openURL(uri);
+          }
+
+          if (isAvailable) {
+            await Sharing.shareAsync(path, {
+              mimeType: uri.startsWith('data:image/png') ? 'image/png' : 'image/jpeg',
+              dialogTitle: t('issues_download_image'),
+            });
+            showToast(t('issues_image_saved'));
+          } else {
+            await Linking.openURL(path);
+            showToast(t('issues_image_saved'));
+          }
+        }
+      } catch {
+        showToast(t('issues_image_save_failed'));
+      }
+    },
+    [showToast, t]
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -231,45 +304,213 @@ export function IssuesScreen() {
                 }
               />
             ) : (
-              listIssues.map((issue) => (
-                <ListCard
-                  key={issue.id}
-                  title={
-                    issue.description.slice(0, 60) +
-                    (issue.description.length > 60 ? '…' : '')
-                  }
-                  subtitle={issue.siteName ?? getSiteName(issue.siteId)}
-                  meta={`${issue.createdAt.slice(0, 10)}${issue.imageUris.length > 0 ? ` · ${issue.imageUris.length} ${t('issues_images_attached')}` : ''}`}
-                  right={
-                    canUpdateStatus ? (
-                      <Pressable
-                        onPress={() => openStatusPicker(issue)}
-                        disabled={updatingIssueId === issue.id}
-                        style={({ pressed }) => ({
-                          opacity: pressed || updatingIssueId === issue.id ? 0.7 : 1,
-                        })}
-                      >
-                        <Badge variant={statusVariant[issue.status]} size="sm">
-                          {t(`issues_status_${issue.status}`)}
-                        </Badge>
-                      </Pressable>
-                    ) : (
-                      <Badge variant={statusVariant[issue.status]} size="sm">
-                        {t(`issues_status_${issue.status}`)}
-                      </Badge>
-                    )
-                  }
-                  footer={
-                    canUpdateStatus ? (
-                      <Text style={styles.tapHint}>{t('issues_tap_status_to_update')}</Text>
-                    ) : undefined
-                  }
-                />
-              ))
+              listIssues.map((issue) => {
+                const isUpdating = updatingIssueId === issue.id;
+                return (
+                  <TouchableOpacity
+                    key={issue.id}
+                    onPress={() => openIssueDetail(issue)}
+                    activeOpacity={0.7}
+                    style={[styles.issueCardTouchable, isUpdating && styles.issueCardUpdating]}
+                    accessibilityRole="button"
+                    accessibilityLabel={issue.description.slice(0, 60)}
+                  >
+                    <ListCard
+                      onPress={undefined}
+                      style={styles.issueCardInner}
+                      title={
+                        issue.description.slice(0, 60) +
+                        (issue.description.length > 60 ? '…' : '')
+                      }
+                      subtitle={issue.siteName ?? getSiteName(issue.siteId)}
+                      meta={`${issue.createdAt.slice(0, 10)}${(issue.imageUris?.length ?? 0) > 0 ? ` · ${issue.imageUris!.length} ${t('issues_images_attached')}` : ''}`}
+                      right={
+                        <View style={styles.issueRightRow}>
+                          {isUpdating && (
+                            <View style={styles.issueUpdatingWrap}>
+                              <ActivityIndicator size="small" color={colors.primary} />
+                              <Text style={styles.issueUpdatingText}>{t('issues_updating')}</Text>
+                            </View>
+                          )}
+                          <Badge variant={statusVariant[issue.status]} size="sm">
+                            {t(`issues_status_${issue.status}`)}
+                          </Badge>
+                        </View>
+                      }
+                      footer={
+                        (issue.imageUris?.length ?? 0) > 0 ? (
+                          <View style={styles.issueImagesSection}>
+                            <ScrollView
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={styles.issueThumbsScroll}
+                            >
+                              {(issue.imageUris ?? []).map((uri, idx) => (
+                                <TouchableOpacity
+                                  key={`${issue.id}-${idx}-${uri.slice(-12)}`}
+                                  onPress={(e) => { e?.stopPropagation?.(); setViewingImageUri(uri); }}
+                                  activeOpacity={0.8}
+                                  style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
+                                >
+                                  <Image
+                                    source={{ uri }}
+                                    style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]}
+                                    resizeMode="cover"
+                                  />
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                            <View style={styles.issueImageActions}>
+                              <TouchableOpacity
+                                onPress={(e) => { e?.stopPropagation?.(); issue.imageUris?.length && setViewingImageUri(issue.imageUris![0]); }}
+                                style={styles.issueImageBtn}
+                              >
+                                <Text style={styles.issueImageBtnText}>{t('issues_view_images')}</Text>
+                              </TouchableOpacity>
+                              {(issue.imageUris ?? []).map((uri, idx) => (
+                                <TouchableOpacity
+                                  key={`dl-${idx}`}
+                                  onPress={(e) => { e?.stopPropagation?.(); handleDownloadImage(uri); }}
+                                  style={styles.issueImageBtn}
+                                >
+                                  <Text style={styles.issueImageBtnText}>
+                                    {t('issues_download_image')}{(issue.imageUris?.length ?? 0) > 1 ? ` (${idx + 1})` : ''}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          </View>
+                        ) : undefined
+                      }
+                    />
+                  </TouchableOpacity>
+                );
+              })
             )}
           </>
         )}
       </ScreenContainer>
+
+      <Modal
+        visible={!!viewingImageUri}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewingImageUri(null)}
+      >
+        <View style={styles.imageModalOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setViewingImageUri(null)}
+          />
+          <View style={styles.imageModalContent} pointerEvents="box-none">
+            <View pointerEvents="auto">
+              <Pressable
+                style={styles.imageModalClose}
+                onPress={() => setViewingImageUri(null)}
+                accessibilityLabel={t('common_cancel')}
+              >
+                <Text style={styles.imageModalCloseText}>×</Text>
+              </Pressable>
+              {viewingImageUri && (
+                <Image
+                  source={{ uri: viewingImageUri }}
+                  style={styles.imageModalImage}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedIssue}
+        transparent
+        animationType="fade"
+        onRequestClose={closeIssueDetail}
+      >
+        <View style={styles.detailModalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeIssueDetail} />
+          <View style={styles.detailModalContent} pointerEvents="box-none">
+            <View style={styles.detailModalCard} pointerEvents="auto">
+              <View style={styles.detailModalHeader}>
+                <Text style={styles.detailModalTitle}>{t('issues_detail_title')}</Text>
+                <Pressable onPress={closeIssueDetail} style={styles.detailModalClose} accessibilityLabel={t('common_cancel')}>
+                  <Text style={styles.imageModalCloseText}>×</Text>
+                </Pressable>
+              </View>
+              {selectedIssue && (
+                <ScrollView style={styles.detailModalScroll} showsVerticalScrollIndicator={false}>
+                  <Text style={styles.detailSectionLabel}>{t('issues_description')}</Text>
+                  <Text style={styles.detailDescription}>{selectedIssue.description}</Text>
+                  <Text style={styles.detailMeta}>
+                    {selectedIssue.siteName ?? getSiteName(selectedIssue.siteId)} · {selectedIssue.createdAt.slice(0, 10)}
+                  </Text>
+                  <View style={styles.detailBadgeWrap}>
+                    <Badge variant={statusVariant[selectedIssue.status]} size="sm">
+                      {t(`issues_status_${selectedIssue.status}`)}
+                    </Badge>
+                  </View>
+                  {(selectedIssue.imageUris?.length ?? 0) > 0 && (
+                    <View style={styles.detailImagesWrap}>
+                      <Text style={styles.detailImagesLabel}>{t('issues_images_attached')}</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.issueThumbsScroll}>
+                        {(selectedIssue.imageUris ?? []).map((uri, idx) => (
+                          <TouchableOpacity
+                            key={idx}
+                            onPress={() => setViewingImageUri(uri)}
+                            style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
+                          >
+                            <Image source={{ uri }} style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]} resizeMode="cover" />
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <View style={styles.issueImageActions}>
+                        <TouchableOpacity onPress={() => setViewingImageUri(selectedIssue.imageUris![0])} style={styles.issueImageBtn}>
+                          <Text style={styles.issueImageBtnText}>{t('issues_view_images')}</Text>
+                        </TouchableOpacity>
+                        {(selectedIssue.imageUris ?? []).map((uri, idx) => (
+                          <TouchableOpacity key={idx} onPress={() => handleDownloadImage(uri)} style={styles.issueImageBtn}>
+                            <Text style={styles.issueImageBtnText}>{t('issues_download_image')}{(selectedIssue.imageUris?.length ?? 0) > 1 ? ` (${idx + 1})` : ''}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                  {canUpdateStatus && updatingIssueId !== selectedIssue.id && (
+                    <View style={styles.detailActionsWrap}>
+                      <Text style={styles.detailSectionLabel}>{t('issues_change_status')}</Text>
+                      <View style={styles.detailActions}>
+                      {issueStatusOptions.map((opt) => (
+                        <TouchableOpacity
+                          key={opt.value}
+                          onPress={async () => {
+                            if (selectedIssue.status === opt.value) return;
+                            await onStatusChange(selectedIssue, opt.value);
+                            closeIssueDetail();
+                          }}
+                          style={[styles.detailActionBtn, selectedIssue.status === opt.value && styles.detailActionBtnActive]}
+                        >
+                          <Text style={[styles.detailActionBtnText, selectedIssue.status === opt.value && styles.detailActionBtnTextActive]}>
+                            {t(opt.labelKey)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    </View>
+                  )}
+                  {canUpdateStatus && updatingIssueId === selectedIssue.id && (
+                    <View style={styles.detailUpdatingWrap}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={styles.issueUpdatingText}>{t('issues_updating')}</Text>
+                    </View>
+                  )}
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ModalWithKeyboard
         visible={raiseModalVisible}
@@ -382,6 +623,149 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.xs,
   },
+  viewUpdateBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    marginBottom: spacing.xs,
+  },
+  viewUpdateBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.surface,
+  },
+  issueCardTouchable: {
+    marginBottom: spacing.sm,
+  },
+  issueCardInner: {
+    marginBottom: 0,
+  },
+  issueCardUpdating: {
+    opacity: 0.85,
+  },
+  detailModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  detailModalContent: {
+    width: '100%',
+    maxWidth: 440,
+    maxHeight: '85%',
+  },
+  detailModalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  detailModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  detailModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  detailModalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.gray100,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  detailModalScroll: {
+    maxHeight: 400,
+  },
+  detailSectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailDescription: {
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+    marginBottom: spacing.sm,
+  },
+  detailMeta: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  detailBadgeWrap: {
+    marginBottom: spacing.md,
+  },
+  detailImagesWrap: {
+    marginBottom: spacing.md,
+  },
+  detailImagesLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: spacing.xs,
+  },
+  detailActionsWrap: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  detailActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  detailActionBtn: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.gray100,
+  },
+  detailActionBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  detailActionBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  detailActionBtnTextActive: {
+    color: colors.surface,
+  },
+  detailUpdatingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  issueRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  issueUpdatingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  issueUpdatingText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
   modalHeader: {
     alignItems: 'center',
     marginBottom: spacing.md,
@@ -446,5 +830,72 @@ const styles = StyleSheet.create({
   removeThumbText: {
     color: colors.surface,
     fontSize: 12,
+  },
+  issueImagesSection: {
+    marginTop: spacing.sm,
+  },
+  issueThumbsScroll: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  issueThumbWrap: {
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    backgroundColor: colors.gray200,
+  },
+  issueThumb: {
+    borderRadius: radius.sm,
+  },
+  issueImageActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  issueImageBtn: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.gray100,
+  },
+  issueImageBtnText: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  imageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalContent: {
+    width: '100%',
+    maxWidth: 400,
+    padding: spacing.lg,
+    position: 'relative',
+  },
+  imageModalClose: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    zIndex: 1,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCloseText: {
+    color: colors.surface,
+    fontSize: 24,
+    lineHeight: 28,
+  },
+  imageModalImage: {
+    width: '100%',
+    aspectRatio: 1,
+    maxHeight: 400,
   },
 });

@@ -369,11 +369,27 @@ export function UsersScreen() {
     Alert.alert(t('alert_copied'), t('users_copied'));
   };
 
-  const handleShareWhatsApp = () => {
+  const handleShareWhatsApp = async () => {
     if (!credentialsModal) return;
     const text = `Your HapyJo login:\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}\n\n${t('users_share_login_body')}`;
-    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    Linking.openURL(url);
+    const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(text)}`;
+    const webUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+
+    try {
+      const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
+      if (canOpenWhatsApp) {
+        await Linking.openURL(whatsappUrl);
+        return;
+      }
+      const canOpenWeb = await Linking.canOpenURL(webUrl);
+      if (canOpenWeb) {
+        await Linking.openURL(webUrl);
+        return;
+      }
+      Alert.alert(t('alert_error'), t('users_whatsapp_not_available'));
+    } catch {
+      Alert.alert(t('alert_error'), t('users_whatsapp_not_available'));
+    }
   };
 
   const roleOptions = assignableRoles.map((role) => ({

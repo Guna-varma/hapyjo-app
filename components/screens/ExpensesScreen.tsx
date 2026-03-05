@@ -216,6 +216,7 @@ export function ExpensesScreen() {
         <Input
           value={amountRwf}
           onChangeText={setAmountRwf}
+          onFocus={() => { if (amountRwf === '0') setAmountRwf(''); }}
           placeholder={t('expenses_amount_placeholder')}
           keyboardType="number-pad"
         />
@@ -264,6 +265,7 @@ export function ExpensesScreen() {
           label={t('expenses_litres_star')}
           value={litres}
           onChangeText={setLitres}
+          onFocus={() => { if (litres === '0') setLitres(''); }}
           placeholder={t('expenses_fuel_placeholder')}
           keyboardType="decimal-pad"
         />
@@ -271,6 +273,7 @@ export function ExpensesScreen() {
           label={t('expenses_cost_per_litre')}
           value={costPerLitre}
           onChangeText={setCostPerLitre}
+          onFocus={() => { if (costPerLitre === '0') setCostPerLitre(''); }}
           placeholder={t('expenses_cost_placeholder')}
           keyboardType="decimal-pad"
         />

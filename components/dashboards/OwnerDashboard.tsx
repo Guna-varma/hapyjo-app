@@ -273,6 +273,7 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
                 <TextInput
                   value={rateInput}
                   onChangeText={setRateInput}
+                  onFocus={() => { if (rateInput === '0') setRateInput(''); }}
                   placeholder="e.g. 500"
                   keyboardType="number-pad"
                   style={modalStyles.input}

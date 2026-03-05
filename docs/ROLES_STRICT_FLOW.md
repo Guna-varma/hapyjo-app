@@ -10,12 +10,12 @@
 ### Head Supervisor
 
 - **Allocates vehicles to sites** (one site → many vehicles). Use the **Vehicles** tab: edit each vehicle and set its **Site**. No in-app "Add vehicle"; vehicles come from website sync.
-- Does **not** assign drivers/operators to vehicles. That screen is for Assistant Supervisor only.
+- Can also **assign drivers and operators to vehicles** at sites (same screen as Assistant Supervisor); RLS allows admin, head_supervisor, and assistant_supervisor to save driver/vehicle assignments (owner excluded).
 
 ### Assistant Supervisor
 
-- **Assigns drivers and operators to vehicles** at each site. Use Dashboard → "Assign drivers & operators to vehicles". Only they can change who (driver/operator) uses which vehicle at a site.
-- Sees only their assigned sites.
+- **Assigns drivers and operators to vehicles** at each site. Use the site detail → trucks/machines assignment, or Dashboard → "Assign drivers & operators to vehicles". Sees only their assigned sites.
+- Admin and head_supervisor can also save these assignments.
 
 ### Owner
 
@@ -32,4 +32,4 @@
 
 ## DB
 
-- **driver_vehicle_assignments**: only **Assistant Supervisor** can write (RLS). Head Supervisor policy was removed (migration `20250304100000_driver_vehicle_assignments_only_assistant_supervisor.sql`).
+- **driver_vehicle_assignments**: **admin, head_supervisor, and assistant_supervisor** can write (owner excluded). See migration `20250307100000_driver_vehicle_assignments_allow_managers.sql`.

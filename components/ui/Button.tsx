@@ -46,6 +46,7 @@ export function Button({
   };
 
   const isDisabled = disabled || loading;
+  const isTextChild = typeof children === 'string' || typeof children === 'number';
 
   return (
     <TouchableOpacity
@@ -59,9 +60,13 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={variant === 'outline' ? colors.primary : colors.surface} />
       ) : (
-        <Text className={`font-semibold ${textVariants[variant]} ${textSizes[size]}`}>
-          {children}
-        </Text>
+        isTextChild ? (
+          <Text className={`font-semibold ${textVariants[variant]} ${textSizes[size]}`}>
+            {children}
+          </Text>
+        ) : (
+          children
+        )
       )}
     </TouchableOpacity>
   );

@@ -13,9 +13,25 @@ import type {
   Operation,
   Report,
   Notification,
+  BudgetAllocation,
 } from '@/types';
 
 /** DB row (snake_case) → App (camelCase) */
+
+/** Normalize Postgres array column: can be string[] or Postgres text representation like "{id1,id2}". Returns trimmed, non-empty ids only. */
+function toStringArray(value: unknown): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value.map((x) => String(x).trim()).filter(Boolean);
+  }
+  const s = String(value).trim();
+  if (!s || s === '{}') return [];
+  if (s.startsWith('{') && s.endsWith('}')) {
+    const inner = s.slice(1, -1);
+    return inner ? inner.split(',').map((x) => String(x).replace(/^"|"$/g, '').trim()).filter(Boolean) : [];
+  }
+  return [s];
+}
 
 export function profileFromRow(row: Record<string, unknown>): User {
   return {
@@ -40,14 +56,16 @@ export function siteFromRow(row: Record<string, unknown>): Site {
     location: String(row.location),
     status: row.status as Site['status'],
     startDate: row.start_date != null ? String(row.start_date) : '',
+    expectedEndDate: row.expected_end_date != null ? String(row.expected_end_date) : undefined,
+    actualCompletedAt: row.actual_completed_at != null ? String(row.actual_completed_at) : undefined,
     budget: Number(row.budget ?? 0),
     spent: Number(row.spent ?? 0),
     progress: Number(row.progress ?? 0),
     manager: row.manager != null ? String(row.manager) : undefined,
     assistantSupervisorId: row.assistant_supervisor_id != null ? String(row.assistant_supervisor_id) : undefined,
     surveyorId: row.surveyor_id != null ? String(row.surveyor_id) : undefined,
-    driverIds: (row.driver_ids as string[]) ?? [],
-    vehicleIds: (row.vehicle_ids as string[]) ?? [],
+    driverIds: toStringArray(row.driver_ids),
+    vehicleIds: toStringArray(row.vehicle_ids),
     contractRateRwf: row.contract_rate_rwf != null ? Number(row.contract_rate_rwf) : undefined,
   };
 }
@@ -164,7 +182,7 @@ export function siteAssignmentFromRow(row: Record<string, unknown>): SiteAssignm
     siteId: String(row.site_id),
     userId: String(row.user_id),
     role: String(row.role),
-    vehicleIds: (row.vehicle_ids as string[]) ?? [],
+    vehicleIds: toStringArray(row.vehicle_ids),
   };
 }
 
@@ -172,7 +190,7 @@ export function driverVehicleAssignmentFromRow(row: Record<string, unknown>): Dr
   return {
     siteId: String(row.site_id),
     driverId: String(row.driver_id),
-    vehicleIds: (row.vehicle_ids as string[]) ?? [],
+    vehicleIds: toStringArray(row.vehicle_ids),
   };
 }
 
@@ -258,6 +276,8 @@ export function siteToRow(s: Partial<Site>): Record<string, unknown> {
   if (s.location != null) row.location = s.location;
   if (s.status != null) row.status = s.status;
   if (s.startDate != null) row.start_date = s.startDate;
+  if (s.expectedEndDate !== undefined) row.expected_end_date = s.expectedEndDate ?? null;
+  if (s.actualCompletedAt !== undefined) row.actual_completed_at = s.actualCompletedAt ?? null;
   if (s.budget != null) row.budget = s.budget;
   if (s.spent != null) row.spent = s.spent;
   if (s.progress != null) row.progress = s.progress;
@@ -270,16 +290,36 @@ export function siteToRow(s: Partial<Site>): Record<string, unknown> {
   return row;
 }
 
+export function budgetAllocationFromRow(row: Record<string, unknown>): BudgetAllocation {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    amountRwf: Number(row.amount_rwf ?? 0),
+    allocatedAt: row.allocated_at != null ? String(row.allocated_at) : '',
+    allocatedById: row.allocated_by != null ? String(row.allocated_by) : undefined,
+  };
+}
+
+export function budgetAllocationToRow(b: Partial<BudgetAllocation>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (b.id != null) row.id = b.id;
+  if (b.siteId != null) row.site_id = b.siteId;
+  if (b.amountRwf != null) row.amount_rwf = b.amountRwf;
+  if (b.allocatedAt != null) row.allocated_at = b.allocatedAt;
+  if (b.allocatedById !== undefined) row.allocated_by = b.allocatedById ?? null;
+  return row;
+}
+
 export function vehicleToRow(v: Partial<Vehicle>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (v.id != null) row.id = v.id;
-  row.site_id = (v.siteId != null && v.siteId !== '') ? v.siteId : null;
+  if (v.siteId !== undefined) row.site_id = (v.siteId != null && v.siteId !== '') ? v.siteId : null;
   if (v.type != null) row.type = v.type;
   if (v.vehicleNumberOrId != null) row.vehicle_number_or_id = v.vehicleNumberOrId;
   if (v.mileageKmPerLitre !== undefined) row.mileage_km_per_litre = v.mileageKmPerLitre;
   if (v.hoursPerLitre !== undefined) row.hours_per_litre = v.hoursPerLitre;
-  if (v.tankCapacityLitre != null) row.tank_capacity_litre = v.tankCapacityLitre;
-  if (v.fuelBalanceLitre != null) row.fuel_balance_litre = v.fuelBalanceLitre;
+  if (v.tankCapacityLitre !== undefined) row.tank_capacity_litre = Number(v.tankCapacityLitre);
+  if (v.fuelBalanceLitre !== undefined) row.fuel_balance_litre = Number(v.fuelBalanceLitre);
   if (v.idealConsumptionRange !== undefined) row.ideal_consumption_range = v.idealConsumptionRange;
   if (v.healthInputs !== undefined) row.health_inputs = v.healthInputs;
   if (v.idealWorkingRange !== undefined) row.ideal_working_range = v.idealWorkingRange;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   Modal,
   View,
@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { FormScrollProvider, getKeyboardSafePaddingBottom } from '@/context/FormScrollContext';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { colors, spacing } from '@/theme/tokens';
 
@@ -46,9 +47,11 @@ export function FormModal({
   submitting = false,
   children,
 }: FormModalProps) {
+  const scrollRef = useRef<ScrollView>(null);
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const maxHeight = height * 0.85;
+  const keyboardSafePaddingBottom = getKeyboardSafePaddingBottom(height);
 
   const handlePrimary = async () => {
     const result = onPrimary();
@@ -75,15 +78,21 @@ export function FormModal({
               style={styles.keyboardView}
             >
               <Text style={modalStyles.title}>{title}</Text>
-              <ScrollView
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={true}
-                contentContainerStyle={styles.scrollContent}
-                style={styles.scrollView}
-              >
-                {children}
-              </ScrollView>
-              <View style={[modalStyles.footer, { paddingBottom: Math.max(spacing.sm, insets.bottom) }]}>
+              <FormScrollProvider scrollViewRef={scrollRef}>
+                <ScrollView
+                  ref={scrollRef}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={true}
+                  contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: keyboardSafePaddingBottom + insets.bottom },
+                  ]}
+                  style={styles.scrollView}
+                >
+                  {children}
+                </ScrollView>
+              </FormScrollProvider>
+              <View style={[styles.footerSticky, { paddingBottom: Math.max(spacing.md, insets.bottom) }]}>
                 {secondaryLabel != null && (
                   <Pressable
                     onPress={() => {
@@ -91,7 +100,6 @@ export function FormModal({
                       onClose();
                     }}
                     style={[modalStyles.btn, modalStyles.btnSecondary]}
-                    disabled={submitting}
                   >
                     <Text style={modalStyles.btnTextSecondary}>{secondaryLabel}</Text>
                   </Pressable>
@@ -131,12 +139,19 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: spacing.md,
   },
+  footerSticky: {
+    ...modalStyles.footer,
+    backgroundColor: colors.surface,
+    paddingTop: spacing.sm,
+  },
   primaryBtn: {
+    flex: 1,
     backgroundColor: colors.primary,
+    minHeight: 48,
   },
   primaryBtnText: {
     color: colors.surface,
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 16,
   },
 });

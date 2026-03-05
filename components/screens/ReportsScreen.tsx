@@ -113,13 +113,14 @@ function buildDetailedReportCSV(
     rows.push([csvEscape('Section'), csvEscape('Metric'), csvEscape('Value'), csvEscape('Unit')].join(','));
     rows.push([csvEscape('Summary'), csvEscape('Active Sites'), csvEscape(String(d.activeSites ?? '')), csvEscape('count')].join(','));
     rows.push('');
-    const sitesSummary = (d.sitesSummary as { siteName: string; budget: number; spent: number; remaining: number; utilizationPct: number }[]) ?? [];
+    const sitesSummary = (d.sitesSummary as { siteName: string; progress?: number; budget: number; spent: number; remaining: number; utilizationPct: number }[]) ?? [];
     if (sitesSummary.length > 0) {
-      rows.push([csvEscape('Sites Performance'), csvEscape('Site Name'), csvEscape('Budget (RWF)'), csvEscape('Spent (RWF)'), csvEscape('Remaining (RWF)'), csvEscape('Utilization %')].join(','));
+      rows.push([csvEscape('Site Performance'), csvEscape('Site Name'), csvEscape('Progress %'), csvEscape('Budget (RWF)'), csvEscape('Spent (RWF)'), csvEscape('Remaining (RWF)'), csvEscape('Utilization %')].join(','));
       sitesSummary.forEach((site) => {
         rows.push([
-          csvEscape('Sites Performance'),
+          csvEscape('Site Performance'),
           csvEscape(site.siteName ?? ''),
+          csvEscape(String(site.progress ?? 0)),
           csvEscape(formatAmountFn(site.budget ?? 0)),
           csvEscape(formatAmountFn(site.spent ?? 0)),
           csvEscape(formatAmountFn(site.remaining ?? 0)),
@@ -128,10 +129,24 @@ function buildDetailedReportCSV(
       });
       rows.push('');
     }
+    const sitesExpenses = (d.sitesExpenses as { siteName: string; totalExpenses: number; fuelExpenses: number; generalExpenses: number }[]) ?? [];
+    if (sitesExpenses.length > 0) {
+      rows.push([csvEscape('Site Expenses'), csvEscape('Site Name'), csvEscape('Total (RWF)'), csvEscape('Fuel (RWF)'), csvEscape('General (RWF)')].join(','));
+      sitesExpenses.forEach((site) => {
+        rows.push([
+          csvEscape('Site Expenses'),
+          csvEscape(site.siteName ?? ''),
+          csvEscape(formatAmountFn(site.totalExpenses ?? 0)),
+          csvEscape(formatAmountFn(site.fuelExpenses ?? 0)),
+          csvEscape(formatAmountFn(site.generalExpenses ?? 0)),
+        ].join(','));
+      });
+      rows.push('');
+    }
   }
 
   // If we have other data keys not yet printed, add a "Raw data" section so nothing is lost
-  const knownKeys = new Set(['periodStart', 'periodEnd', 'generatedAt', 'totalBudget', 'totalSpent', 'remainingBudget', 'revenue', 'expenses', 'fuel_cost', 'profit', 'trips', 'machine_hours', 'expenseCount', 'sitesSummary', 'activeSites', 'completedTasks', 'inProgressTasks', 'pendingTasks']);
+  const knownKeys = new Set(['periodStart', 'periodEnd', 'generatedAt', 'totalBudget', 'totalSpent', 'remainingBudget', 'revenue', 'expenses', 'fuel_cost', 'profit', 'trips', 'machine_hours', 'expenseCount', 'sitesSummary', 'sitesExpenses', 'activeSites', 'completedTasks', 'inProgressTasks', 'pendingTasks']);
   const extra = Object.entries(d).filter(([k]) => !knownKeys.has(k) && d[k] != null && typeof d[k] !== 'object');
   if (extra.length > 0) {
     rows.push([csvEscape('Additional Data'), csvEscape('Key'), csvEscape('Value')].join(','));
@@ -149,13 +164,14 @@ export function ReportsScreen() {
   const [selectedType, setSelectedType] = useState<'all' | 'financial' | 'operations' | 'site_performance'>('all');
   const [reportPeriod, setReportPeriod] = useState<'this_month' | 'last_month'>('this_month');
   const [fuelSiteId, setFuelSiteId] = useState<string | null>(null);
+  const [fuelVehicleType, setFuelVehicleType] = useState<'all' | 'truck' | 'machine'>('all');
   const [fuelDateFrom, setFuelDateFrom] = useState('');
   const [fuelDateTo, setFuelDateTo] = useState('');
   const [generating, setGenerating] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const readOnly = user ? isReportsReadOnly(user.role) : false;
   const showSummary = user ? canSeeFinancialSummary(user.role) : false;
-  const canGenerate = user ? ['admin', 'owner', 'head_supervisor'].includes(user.role) : false;
+  const canGenerate = user ? ['admin', 'owner', 'head_supervisor', 'assistant_supervisor'].includes(user.role) : false;
 
   // Tabs as data drivers: refetch when report type filter changes so list stays in sync (and future API can filter by type)
   useEffect(() => {
@@ -229,9 +245,12 @@ export function ReportsScreen() {
     return true;
   };
 
-  const vehiclesForFuel = fuelSiteId
+  const vehiclesBySite = fuelSiteId
     ? vehicles.filter((v) => v.siteId === fuelSiteId)
     : vehicles;
+  const vehiclesForFuel = fuelVehicleType === 'all'
+    ? vehiclesBySite
+    : vehiclesBySite.filter((v) => v.type === fuelVehicleType);
   const tripsForFuel = trips.filter((t) => t.status === 'completed' && inDateRange(t.startTime));
   const sessionsForFuel = machineSessions.filter((m) => m.status === 'completed' && inDateRange(m.startTime));
 
@@ -241,9 +260,9 @@ export function ReportsScreen() {
     if (v.type === 'truck' && v.mileageKmPerLitre) {
       const distance = tripsForFuel.filter((t) => t.vehicleId === v.id).reduce((s, t) => s + t.distanceKm, 0);
       expectedFuelByVehicle[v.id] = distance / v.mileageKmPerLitre;
-    } else if (v.type === 'machine' && v.hoursPerLitre) {
+    } else if (v.type === 'machine' && v.hoursPerLitre && v.hoursPerLitre > 0) {
       const hours = sessionsForFuel.filter((m) => m.vehicleId === v.id).reduce((s, m) => s + (m.durationHours ?? 0), 0);
-      expectedFuelByVehicle[v.id] = hours * v.hoursPerLitre;
+      expectedFuelByVehicle[v.id] = hours / v.hoursPerLitre;
     } else {
       expectedFuelByVehicle[v.id] = 0;
     }
@@ -369,6 +388,21 @@ export function ReportsScreen() {
         period,
         data: reportData,
       });
+      // Per-site expenses for the period (from expenses in month)
+      const sitesExpenses = sites.map((site) => {
+        const siteExpensesInMonth = expensesInMonth.filter((e) => e.siteId === site.id);
+        const totalExpenses = siteExpensesInMonth.reduce((s, e) => s + (e.amountRwf ?? 0), 0);
+        const fuelExpenses = siteExpensesInMonth.filter((e) => e.type === 'fuel').reduce((s, e) => s + (e.amountRwf ?? 0), 0);
+        const generalExpenses = siteExpensesInMonth.filter((e) => e.type === 'general').reduce((s, e) => s + (e.amountRwf ?? 0), 0);
+        return { siteId: site.id, siteName: site.name, totalExpenses, fuelExpenses, generalExpenses };
+      });
+      const sitesSummaryWithProgress = sites.map((site) => {
+        const siteSpent = site.spent ?? 0;
+        const siteBudget = site.budget ?? 0;
+        const siteRemaining = Math.max(0, siteBudget - siteSpent);
+        const utilizationPct = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
+        return { siteId: site.id, siteName: site.name, progress: site.progress ?? 0, budget: siteBudget, spent: siteSpent, remaining: siteRemaining, utilizationPct };
+      });
       const existingSitePerf = reports.find((r) => r.period === period && r.type === 'site_performance');
       if (!existingSitePerf) {
         await addReport({
@@ -381,9 +415,22 @@ export function ReportsScreen() {
             periodStart: start,
             periodEnd: end,
             activeSites: sites.filter((s) => s.status === 'active').length,
-            sitesSummary,
+            sitesSummary: sitesSummaryWithProgress,
+            sitesExpenses,
             generatedAt: now.toISOString(),
           },
+        });
+      } else {
+        await updateReport(existingSitePerf.id, {
+          data: {
+            periodStart: start,
+            periodEnd: end,
+            activeSites: sites.filter((s) => s.status === 'active').length,
+            sitesSummary: sitesSummaryWithProgress,
+            sitesExpenses,
+            generatedAt: now.toISOString(),
+          },
+          generatedDate: end,
         });
       }
       Alert.alert(t('reports_generated'), t('reports_generated_message'));
@@ -549,6 +596,201 @@ export function ReportsScreen() {
           </View>
         )}
 
+        {/* Available Reports – at top; label varies by tab */}
+        <View className="mb-4">
+          <Text className="text-lg font-bold text-gray-900 mb-3">
+            {selectedType === 'all' ? t('reports_available') : selectedType === 'financial' ? t('reports_saved_financial') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
+          </Text>
+          {filteredReports.length === 0 ? (
+            <EmptyState
+              icon={<FileText size={32} color={colors.textMuted} />}
+              title={selectedType === 'all' ? t('reports_no_reports') : t('reports_no_reports_for_type')}
+              message={selectedType === 'financial' ? t('reports_empty_financial_hint') : selectedType === 'operations' ? t('reports_empty_operations_hint') : selectedType === 'site_performance' ? t('reports_empty_sites_hint') : t('reports_empty_hint')}
+            />
+          ) : (
+            filteredReports.map((report) => (
+              <Card key={report.id} style={reportCardStyles.card}>
+                <View style={reportCardStyles.cardHeader}>
+                  <View style={reportCardStyles.titleRow}>
+                    {report.type === 'financial' && <Banknote size={18} color="#059669" />}
+                    {report.type === 'operations' && <BarChart3 size={18} color="#6366f1" />}
+                    {report.type === 'site_performance' && <TrendingUp size={18} color={colors.primary} />}
+                    {report.type !== 'financial' && report.type !== 'operations' && report.type !== 'site_performance' && <FileText size={18} color="#64748b" />}
+                    <Text style={reportCardStyles.cardTitle} numberOfLines={2}>{report.title}</Text>
+                  </View>
+                  <View style={reportCardStyles.badge}>
+                    <Text style={reportCardStyles.badgeText}>{report.period}</Text>
+                  </View>
+                </View>
+                <Text style={reportCardStyles.typeLabel}>{report.type.replace('_', ' ')}</Text>
+
+                <View style={reportCardStyles.dataBox}>
+                  {report.type === 'financial' && (() => {
+                    const hasData = report.data && (Number(report.data.totalBudget) != null && Number(report.data.totalBudget) !== 0 || Number(report.data.totalSpent) != null && Number(report.data.totalSpent) !== 0);
+                    const budget = hasData ? (Number(report.data?.totalBudget) || 0) : totalBudgetAll;
+                    const spent = hasData ? (Number(report.data?.totalSpent) || 0) : totalSpentAll;
+                    const remaining = hasData ? (Number(report.data?.remainingBudget) ?? (budget - spent)) : remainingBudgetAll;
+                    return (
+                      <>
+                        <View style={reportCardStyles.dataRow}>
+                          <Text style={reportCardStyles.dataLabel}>{t('reports_total_budget')}</Text>
+                          <Text style={reportCardStyles.dataValue}>{formatAmount(budget, true)}</Text>
+                        </View>
+                        <View style={reportCardStyles.dataRow}>
+                          <Text style={reportCardStyles.dataLabel}>{t('reports_total_spent')}</Text>
+                          <Text style={reportCardStyles.dataValue}>{formatAmount(spent, true)}</Text>
+                        </View>
+                        <View style={reportCardStyles.dataRow}>
+                          <Text style={reportCardStyles.dataLabel}>{t('dashboard_remaining')}</Text>
+                          <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{formatAmount(remaining, true)}</Text>
+                        </View>
+                        {!hasData && (
+                          <Text style={[reportCardStyles.dataLabel, { fontSize: 11, marginTop: 4, color: '#94a3b8' }]}>{t('reports_live_totals_hint')}</Text>
+                        )}
+                      </>
+                    );
+                  })()}
+                  {report.type === 'operations' && report.data && (
+                    <>
+                      <View style={reportCardStyles.dataRow}>
+                        <Text style={reportCardStyles.dataLabel}>{t('dashboard_active_sites')}</Text>
+                        <Text style={reportCardStyles.dataValue}>{String(report.data.activeSites ?? '')}</Text>
+                      </View>
+                      <View style={reportCardStyles.dataRow}>
+                        <Text style={reportCardStyles.dataLabel}>{t('reports_completed_tasks')}</Text>
+                        <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{String(report.data.completedTasks ?? '')}</Text>
+                      </View>
+                      <View style={reportCardStyles.dataRow}>
+                        <Text style={reportCardStyles.dataLabel}>{t('reports_pending_tasks')}</Text>
+                        <Text style={reportCardStyles.dataValueYellow}>{String(report.data.pendingTasks ?? '')}</Text>
+                      </View>
+                    </>
+                  )}
+                  {report.type === 'site_performance' && report.data && (() => {
+                    const sitesSummary = (report.data.sitesSummary as { siteName: string; progress?: number; budget: number; spent: number; remaining: number; utilizationPct: number }[]) ?? [];
+                    const sitesExpenses = (report.data.sitesExpenses as { siteName: string; totalExpenses: number; fuelExpenses: number; generalExpenses: number }[]) ?? [];
+                    return (
+                      <>
+                        <Text style={reportCardStyles.sectionTitle}>{t('reports_site_performance_section')}</Text>
+                        {sitesSummary.length === 0 ? (
+                          <Text style={reportCardStyles.dataLabel}>{t('reports_no_sites')}</Text>
+                        ) : (
+                          sitesSummary.map((site, idx) => {
+                            const progressPct = Math.min(100, Math.max(0, Number(site.progress ?? 0)));
+                            return (
+                            <View key={`perf-${idx}`} style={reportCardStyles.siteBlock}>
+                              <Text style={reportCardStyles.siteBlockName}>{site.siteName}</Text>
+                              <View style={reportCardStyles.progressBarRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('site_card_progress')}</Text>
+                                <View style={reportCardStyles.progressBarTrack}>
+                                  <View style={[reportCardStyles.progressBarFill, { width: `${progressPct}%` }]} />
+                                </View>
+                                <Text style={reportCardStyles.progressBarPct}>{progressPct}%</Text>
+                              </View>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('reports_total_budget')}</Text>
+                                <Text style={reportCardStyles.dataValue}>{formatAmount(Number(site.budget ?? 0), true)}</Text>
+                              </View>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('dashboard_spent')}</Text>
+                                <Text style={reportCardStyles.dataValue}>{formatAmount(Number(site.spent ?? 0), true)}</Text>
+                              </View>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('dashboard_remaining')}</Text>
+                                <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{formatAmount(Number(site.remaining ?? 0), true)}</Text>
+                              </View>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('dashboard_utilization')}</Text>
+                                <Text style={reportCardStyles.dataValue}>{Number(site.utilizationPct ?? 0)}%</Text>
+                              </View>
+                            </View>
+                            );
+                          })
+                        )}
+                        <Text style={[reportCardStyles.sectionTitle, { marginTop: 16 }]}>{t('reports_site_expenses_section')}</Text>
+                        {sitesExpenses.length === 0 ? (
+                          <Text style={reportCardStyles.dataLabel}>{t('reports_no_sites')}</Text>
+                        ) : (
+                          sitesExpenses.map((site, idx) => (
+                            <View key={`exp-${idx}`} style={reportCardStyles.siteBlock}>
+                              <Text style={reportCardStyles.siteBlockName}>{site.siteName}</Text>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('dashboard_spent')}</Text>
+                                <Text style={reportCardStyles.dataValue}>{formatAmount(Number(site.totalExpenses ?? 0), true)}</Text>
+                              </View>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('reports_expense_fuel')}</Text>
+                                <Text style={reportCardStyles.dataValue}>{formatAmount(Number(site.fuelExpenses ?? 0), true)}</Text>
+                              </View>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{t('reports_expense_general')}</Text>
+                                <Text style={reportCardStyles.dataValue}>{formatAmount(Number(site.generalExpenses ?? 0), true)}</Text>
+                              </View>
+                            </View>
+                          ))
+                        )}
+                      </>
+                    );
+                  })()}
+                </View>
+
+                <View style={reportCardStyles.cardFooter}>
+                  <Text style={reportCardStyles.generatedLabel}>{t('reports_generated_label')}: {report.generatedDate}</Text>
+                  {!readOnly && (
+                    <TouchableOpacity
+                      onPress={() => handleExportCSV(report)}
+                      disabled={exportingId === report.id}
+                      style={reportCardStyles.exportBtn}
+                    >
+                      <Download size={16} color="#2563eb" />
+                      <Text style={reportCardStyles.exportBtnText}>
+                        {exportingId === report.id ? t('reports_exporting') : t('reports_export_csv')}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </Card>
+            ))
+          )}
+        </View>
+
+        {/* Current site performance – live list so all sites (e.g. Demo 25%) show in Reports */}
+        {(selectedType === 'all' || selectedType === 'financial') && showSummary && sites.length > 0 && (
+          <View className="mb-4">
+            <Text className="text-lg font-bold text-gray-900 mb-3">{t('reports_current_site_performance')}</Text>
+            {sites.map((site) => {
+              const siteSpent = site.spent ?? 0;
+              const siteBudget = site.budget ?? 0;
+              const utilization = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
+              const progressPct = Math.min(100, Math.max(0, site.progress ?? 0));
+              return (
+                <Card key={site.id} style={[reportCardStyles.siteCard, { marginBottom: 12 }]}>
+                  <View style={reportCardStyles.siteCardHeader}>
+                    <TrendingUp size={18} color={colors.primary} />
+                    <Text style={reportCardStyles.siteCardName}>{site.name}</Text>
+                  </View>
+                  {site.location ? <Text style={reportCardStyles.siteCardLocation}>{site.location}</Text> : null}
+                  <View style={reportCardStyles.progressBarRow}>
+                    <Text style={reportCardStyles.dataLabel}>{t('site_card_progress')}</Text>
+                    <View style={reportCardStyles.progressBarTrack}>
+                      <View style={[reportCardStyles.progressBarFill, { width: `${progressPct}%` }]} />
+                    </View>
+                    <Text style={reportCardStyles.progressBarPct}>{progressPct}%</Text>
+                  </View>
+                  <View style={reportCardStyles.siteCardRow}>
+                    <Text style={reportCardStyles.siteCardLabel}>{t('site_card_budget')}</Text>
+                    <Text style={reportCardStyles.siteCardValue}>{formatAmount(siteBudget, true)}</Text>
+                  </View>
+                  <View style={reportCardStyles.siteCardRow}>
+                    <Text style={reportCardStyles.siteCardLabel}>{t('site_card_spent')}</Text>
+                    <Text style={reportCardStyles.siteCardValue}>{formatAmount(siteSpent, true)} ({utilization}%)</Text>
+                  </View>
+                </Card>
+              );
+            })}
+          </View>
+        )}
+
         {/* Financial stats: 2x2 grid – only when All or Financial tab */}
         {(selectedType === 'all' || selectedType === 'financial') && showSummary ? (
           <View className="mb-4">
@@ -605,6 +847,26 @@ export function ReportsScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            <View className="flex-row flex-wrap gap-2 mb-3">
+              <TouchableOpacity
+                onPress={() => setFuelVehicleType('all')}
+                className={`px-3 py-2 rounded-lg ${fuelVehicleType === 'all' ? 'bg-blue-600' : 'bg-white border border-gray-300'}`}
+              >
+                <Text className={fuelVehicleType === 'all' ? 'text-white font-medium' : 'text-gray-700'}>{t('vehicles_all')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setFuelVehicleType('truck')}
+                className={`px-3 py-2 rounded-lg ${fuelVehicleType === 'truck' ? 'bg-blue-600' : 'bg-white border border-gray-300'}`}
+              >
+                <Text className={fuelVehicleType === 'truck' ? 'text-white font-medium' : 'text-gray-700'}>{t('vehicles_trucks')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setFuelVehicleType('machine')}
+                className={`px-3 py-2 rounded-lg ${fuelVehicleType === 'machine' ? 'bg-blue-600' : 'bg-white border border-gray-300'}`}
+              >
+                <Text className={fuelVehicleType === 'machine' ? 'text-white font-medium' : 'text-gray-700'}>{t('vehicles_machines')}</Text>
+              </TouchableOpacity>
+            </View>
             <View className="flex-row gap-2 mb-2">
               <View className="flex-1">
                 <DatePickerField
@@ -653,7 +915,13 @@ export function ReportsScreen() {
                 <Text className="text-slate-700 text-sm font-medium">{t('reports_clear_dates')}</Text>
               </TouchableOpacity>
             </View>
-            {vehiclesForFuel.map((v) => {
+            {vehiclesForFuel.length === 0 ? (
+              <EmptyState
+                icon={<Fuel size={32} color={colors.textMuted} />}
+                title={t('reports_no_vehicles_allocated')}
+                message=""
+              />
+            ) : vehiclesForFuel.map((v) => {
               const filled = fuelExpensesByVehicle[v.id];
               const totalFilled = filled?.litres ?? 0;
               const totalCost = filled?.cost ?? 0;
@@ -708,91 +976,6 @@ export function ReportsScreen() {
             })}
           </View>
         )}
-
-        {/* Reports List – driven by selected tab; label varies by type */}
-        <View className="mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-3">
-            {selectedType === 'all' ? t('reports_available') : selectedType === 'financial' ? t('reports_saved_financial') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
-          </Text>
-          {filteredReports.length === 0 ? (
-            <EmptyState
-              icon={<FileText size={32} color={colors.textMuted} />}
-              title={selectedType === 'all' ? t('reports_no_reports') : t('reports_no_reports_for_type')}
-              message={selectedType === 'financial' ? t('reports_empty_financial_hint') : selectedType === 'operations' ? t('reports_empty_operations_hint') : selectedType === 'site_performance' ? t('reports_empty_sites_hint') : t('reports_empty_hint')}
-            />
-          ) : (
-            filteredReports.map((report) => (
-              <Card key={report.id} style={reportCardStyles.card}>
-                <View style={reportCardStyles.cardHeader}>
-                  <View style={reportCardStyles.titleRow}>
-                    {report.type === 'financial' && <Banknote size={18} color="#059669" />}
-                    {report.type === 'operations' && <BarChart3 size={18} color="#6366f1" />}
-                    {report.type === 'site_performance' && <TrendingUp size={18} color={colors.primary} />}
-                    {report.type !== 'financial' && report.type !== 'operations' && report.type !== 'site_performance' && <FileText size={18} color="#64748b" />}
-                    <Text style={reportCardStyles.cardTitle} numberOfLines={2}>{report.title}</Text>
-                  </View>
-                  <View style={reportCardStyles.badge}>
-                    <Text style={reportCardStyles.badgeText}>{report.period}</Text>
-                  </View>
-                </View>
-                <Text style={reportCardStyles.typeLabel}>{report.type.replace('_', ' ')}</Text>
-
-                <View style={reportCardStyles.dataBox}>
-                  {report.type === 'financial' && report.data && (
-                    <View style={reportCardStyles.dataRow}>
-                      <Text style={reportCardStyles.dataLabel}>{t('reports_total_budget')}</Text>
-                      <Text style={reportCardStyles.dataValue}>{formatAmount(Number(report.data.totalBudget) || 0, true)}</Text>
-                    </View>
-                  )}
-                  {report.type === 'financial' && report.data && (
-                    <View style={reportCardStyles.dataRow}>
-                      <Text style={reportCardStyles.dataLabel}>{t('reports_total_spent')}</Text>
-                      <Text style={reportCardStyles.dataValue}>{formatAmount(Number(report.data.totalSpent) || 0, true)}</Text>
-                    </View>
-                  )}
-                  {report.type === 'financial' && report.data && (
-                    <View style={reportCardStyles.dataRow}>
-                      <Text style={reportCardStyles.dataLabel}>{t('dashboard_remaining')}</Text>
-                      <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{formatAmount(Number(report.data.remainingBudget) || 0, true)}</Text>
-                    </View>
-                  )}
-                  {report.type === 'operations' && report.data && (
-                    <>
-                      <View style={reportCardStyles.dataRow}>
-                        <Text style={reportCardStyles.dataLabel}>{t('dashboard_active_sites')}</Text>
-                        <Text style={reportCardStyles.dataValue}>{String(report.data.activeSites ?? '')}</Text>
-                      </View>
-                      <View style={reportCardStyles.dataRow}>
-                        <Text style={reportCardStyles.dataLabel}>{t('reports_completed_tasks')}</Text>
-                        <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{String(report.data.completedTasks ?? '')}</Text>
-                      </View>
-                      <View style={reportCardStyles.dataRow}>
-                        <Text style={reportCardStyles.dataLabel}>{t('reports_pending_tasks')}</Text>
-                        <Text style={reportCardStyles.dataValueYellow}>{String(report.data.pendingTasks ?? '')}</Text>
-                      </View>
-                    </>
-                  )}
-                </View>
-
-                <View style={reportCardStyles.cardFooter}>
-                  <Text style={reportCardStyles.generatedLabel}>{t('reports_generated_label')}: {report.generatedDate}</Text>
-                  {!readOnly && (
-                    <TouchableOpacity
-                      onPress={() => handleExportCSV(report)}
-                      disabled={exportingId === report.id}
-                      style={reportCardStyles.exportBtn}
-                    >
-                      <Download size={16} color="#2563eb" />
-                      <Text style={reportCardStyles.exportBtnText}>
-                        {exportingId === report.id ? t('reports_exporting') : t('reports_export_csv')}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </Card>
-            ))
-          )}
-        </View>
 
         {/* Generate Report – Owner / Admin / Head Supervisor */}
         {canGenerate && (
@@ -882,6 +1065,53 @@ const reportCardStyles = StyleSheet.create({
     marginVertical: 8,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+  },
+  siteBlock: {
+    marginBottom: 12,
+    padding: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  progressBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  progressBarTrack: {
+    flex: 1,
+    height: 10,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#2563eb',
+    borderRadius: 5,
+  },
+  progressBarPct: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1e293b',
+    minWidth: 36,
+    textAlign: 'right',
+  },
+  siteBlockName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 6,
   },
   dataRow: {
     flexDirection: 'row',

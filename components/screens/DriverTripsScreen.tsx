@@ -787,6 +787,7 @@ export function DriverTripsScreen() {
                 <TextInput
                   value={fuelFilledAtStart}
                   onChangeText={setFuelFilledAtStart}
+                  onFocus={() => { if (fuelFilledAtStart === '0') setFuelFilledAtStart(''); }}
                   placeholder={t('driver_fuel_start_placeholder')}
                   keyboardType="decimal-pad"
                   className="border border-gray-300 rounded-lg px-3 py-2 mb-4 bg-white"
@@ -838,6 +839,7 @@ export function DriverTripsScreen() {
             <TextInput
               value={refuelLitres}
               onChangeText={setRefuelLitres}
+              onFocus={() => { if (refuelLitres === '0') setRefuelLitres(''); }}
               placeholder={t('driver_refuel_litres_placeholder')}
               keyboardType="decimal-pad"
               className="border border-gray-300 rounded-lg px-3 py-2 mb-3 bg-white"
@@ -846,6 +848,7 @@ export function DriverTripsScreen() {
             <TextInput
               value={refuelCostPerLitre}
               onChangeText={setRefuelCostPerLitre}
+              onFocus={() => { if (refuelCostPerLitre === '0') setRefuelCostPerLitre(''); }}
               placeholder={t('driver_refuel_cost_placeholder')}
               keyboardType="decimal-pad"
               className="border border-gray-300 rounded-lg px-3 py-2 mb-4 bg-white"

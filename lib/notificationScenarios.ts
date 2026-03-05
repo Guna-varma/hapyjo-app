@@ -300,6 +300,28 @@ export interface InsertNotificationRow {
   body: string;
   link_id?: string;
   link_type?: string;
+  target_user_id?: string;
+}
+
+/** Build a single notification row for a specific user (driver/operator). Only that user sees it. */
+export function buildNotificationRowForUser(
+  targetRole: string,
+  targetUserId: string,
+  title: string,
+  body: string,
+  generateId: () => string,
+  linkId?: string,
+  linkType?: string
+): InsertNotificationRow {
+  return {
+    id: generateId(),
+    target_role: targetRole,
+    target_user_id: targetUserId,
+    title,
+    body,
+    link_id: linkId,
+    link_type: linkType,
+  };
 }
 
 /**

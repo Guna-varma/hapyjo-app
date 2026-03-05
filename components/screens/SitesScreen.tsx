@@ -26,13 +26,15 @@ import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { colors, radius, spacing } from '@/theme/tokens';
 import { generateId } from '@/lib/id';
+import { formatAmount } from '@/lib/currency';
+import { validateSiteDates, getDateFieldErrorKeys } from '@/lib/dateValidation';
 import { Plus } from 'lucide-react-native';
 
 export function SitesScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, updateSite, addSite, refetch, loading } = useMockAppStore();
+  const { sites, addSite, addBudgetAllocation, budgetAllocations, refetch, loading } = useMockAppStore();
   const { showToast } = useToast();
   const isHeadSupervisor = user?.role === 'head_supervisor';
   const [budgetModalVisible, setBudgetModalVisible] = useState(false);
@@ -45,6 +47,8 @@ export function SitesScreen() {
   const [submittingBudget, setSubmittingBudget] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [newSiteLocation, setNewSiteLocation] = useState('');
+  const [newSiteStartDate, setNewSiteStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newSiteExpectedEndDate, setNewSiteExpectedEndDate] = useState('');
   const [newSiteBudget, setNewSiteBudget] = useState('');
 
   const handleAllocateBudget = () => {
@@ -61,7 +65,8 @@ export function SitesScreen() {
     }
     setSubmittingBudget(true);
     try {
-      await updateSite(allocateSiteId, { budget: amount });
+      await addBudgetAllocation(allocateSiteId, amount);
+      setAmountRwf('');
       setBudgetModalVisible(false);
       showToast(t('sites_toast_budget_updated'));
     } catch {
@@ -71,6 +76,34 @@ export function SitesScreen() {
     }
   };
 
+  const allocationsForSelectedSite = allocateSiteId
+    ? budgetAllocations.filter((a) => a.siteId === allocateSiteId)
+    : [];
+  const selectedSiteForBudget = allocateSiteId ? sites.find((s) => s.id === allocateSiteId) : null;
+  const sumFromAllocationRows = allocationsForSelectedSite.reduce((sum, a) => sum + a.amountRwf, 0);
+  const totalAllocatedForSelected = selectedSiteForBudget?.budget ?? 0;
+  const initialShortfall =
+    selectedSiteForBudget && totalAllocatedForSelected > sumFromAllocationRows
+      ? totalAllocatedForSelected - sumFromAllocationRows
+      : 0;
+  const displayAllocationsWithInitial = (() => {
+    const list: { id: string; amountRwf: number; allocatedAt: string; isInitial?: boolean }[] = [
+      ...allocationsForSelectedSite.map((a) => ({ id: a.id, amountRwf: a.amountRwf, allocatedAt: a.allocatedAt })),
+    ];
+    if (initialShortfall > 0 && selectedSiteForBudget) {
+      list.push({
+        id: 'initial',
+        amountRwf: initialShortfall,
+        allocatedAt: selectedSiteForBudget.startDate
+          ? new Date(selectedSiteForBudget.startDate + 'T00:00:00').toISOString()
+          : new Date(0).toISOString(),
+        isInitial: true,
+      });
+    }
+    list.sort((a, b) => new Date(a.allocatedAt).getTime() - new Date(b.allocatedAt).getTime());
+    return list.reverse();
+  })();
+
   const selectedSite = detailSiteId
     ? sites.find((s) => s.id === detailSiteId)
     : null;
@@ -78,6 +111,8 @@ export function SitesScreen() {
   const handleCreateSite = () => {
     setNewSiteName('');
     setNewSiteLocation('');
+    setNewSiteStartDate(new Date().toISOString().slice(0, 10));
+    setNewSiteExpectedEndDate('');
     setNewSiteBudget('');
     setCreateSiteModalVisible(true);
   };
@@ -89,6 +124,13 @@ export function SitesScreen() {
       Alert.alert(t('sites_required_fields_title'), t('sites_required_fields'));
       return;
     }
+    const startDate = newSiteStartDate?.trim() || new Date().toISOString().slice(0, 10);
+    const expectedEndDate = newSiteExpectedEndDate?.trim() || undefined;
+    const dateValidation = validateSiteDates(startDate, expectedEndDate);
+    if (!dateValidation.valid) {
+      Alert.alert(t('alert_error'), t(dateValidation.errorKey));
+      return;
+    }
     const budget = parseInt(newSiteBudget, 10) || 0;
     const id = generateId('site');
     setSubmittingCreate(true);
@@ -98,7 +140,8 @@ export function SitesScreen() {
         name,
         location,
         status: 'active',
-        startDate: new Date().toISOString().slice(0, 10),
+        startDate,
+        expectedEndDate: expectedEndDate || undefined,
         budget: budget > 0 ? budget : 1000000,
         spent: 0,
         progress: 0,
@@ -122,6 +165,10 @@ export function SitesScreen() {
   };
 
   const siteOptions = sites.map((s) => ({ value: s.id, label: s.name }));
+
+  const dateFieldErrors = getDateFieldErrorKeys(newSiteStartDate, newSiteExpectedEndDate);
+  const startDateError = dateFieldErrors.startErrorKey ? t(dateFieldErrors.startErrorKey) : undefined;
+  const expectedEndDateError = dateFieldErrors.endErrorKey ? t(dateFieldErrors.endErrorKey) : undefined;
 
   if (selectedSite) {
     return (
@@ -214,9 +261,24 @@ export function SitesScreen() {
           placeholder={t('sites_location_placeholder')}
         />
         <Input
+          label={t('sites_start_date_work')}
+          value={newSiteStartDate}
+          onChangeText={setNewSiteStartDate}
+          placeholder="YYYY-MM-DD"
+          error={startDateError}
+        />
+        <Input
+          label={t('sites_expected_end_date')}
+          value={newSiteExpectedEndDate}
+          onChangeText={setNewSiteExpectedEndDate}
+          placeholder="YYYY-MM-DD (optional)"
+          error={expectedEndDateError}
+        />
+        <Input
           label={t('sites_initial_budget_optional')}
           value={newSiteBudget}
           onChangeText={setNewSiteBudget}
+          onFocus={() => { if (newSiteBudget === '0') setNewSiteBudget(''); }}
           placeholder={t('sites_budget_placeholder')}
           keyboardType="number-pad"
         />
@@ -238,11 +300,42 @@ export function SitesScreen() {
           onChange={setAllocateSiteId}
           scroll={false}
         />
+        {allocateSiteId && (
+          <View style={styles.budgetHistorySection}>
+            <Text style={styles.budgetHistoryTitle}>{t('sites_budget_history')}</Text>
+            <Text style={styles.budgetHistoryHint}>{t('sites_allocation_adds_to_total')}</Text>
+            <Text style={styles.totalAllocated}>
+              {t('sites_total_allocated')}: {formatAmount(totalAllocatedForSelected, true)}
+            </Text>
+            {displayAllocationsWithInitial.length > 0 ? (
+              displayAllocationsWithInitial.map((a) => (
+                <View key={a.id} style={styles.allocationRow}>
+                  <Text style={styles.allocationDate}>
+                    {a.isInitial
+                      ? t('sites_initial_budget_row')
+                      : new Date(a.allocatedAt).toLocaleString(undefined, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                  </Text>
+                  <Text style={styles.allocationAmount}>{formatAmount(a.amountRwf, true)}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.allocationEmpty}>
+                {totalAllocatedForSelected > 0
+                  ? formatAmount(totalAllocatedForSelected, true) + ' (initial budget)'
+                  : '—'}
+              </Text>
+            )}
+          </View>
+        )}
         <View style={styles.chipMargin} />
         <Input
           label={t('sites_amount_rwf')}
           value={amountRwf}
           onChangeText={setAmountRwf}
+          onFocus={() => { if (amountRwf === '0') setAmountRwf(''); }}
           placeholder={t('sites_budget_placeholder')}
           keyboardType="number-pad"
         />
@@ -308,4 +401,49 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   chipMargin: { height: spacing.sm },
+  budgetHistorySection: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  budgetHistoryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  budgetHistoryHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  totalAllocated: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: spacing.sm,
+  },
+  allocationRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  allocationDate: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  allocationAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  allocationEmpty: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+  },
 });

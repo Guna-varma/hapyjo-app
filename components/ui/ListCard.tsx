@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ViewStyle, Platform } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 
@@ -59,7 +59,13 @@ export function ListCard({
 
   if (onPress != null) {
     return (
-      <Pressable onPress={onPress} style={[styles.wrapper, style]} accessibilityRole="button">
+      <Pressable
+        onPress={onPress}
+        style={[styles.wrapper, styles.pressable, style]}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+      >
         <Card>{content}</Card>
       </Pressable>
     );
@@ -75,6 +81,9 @@ const styles = StyleSheet.create({
   wrapper: {
     marginBottom: spacing.sm,
     minHeight: layout.minTouchHeight,
+  },
+  pressable: {
+    ...(Platform.OS === 'web' ? { cursor: 'pointer' as const } : {}),
   },
   row: {
     flexDirection: 'row',

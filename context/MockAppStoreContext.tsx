@@ -14,6 +14,7 @@ import type {
   Operation,
   Report,
   Notification,
+  BudgetAllocation,
 } from '@/types';
 import { supabase } from '@/lib/supabase';
 import {
@@ -31,6 +32,8 @@ import {
   reportFromRow,
   profileFromRow,
   notificationFromRow,
+  budgetAllocationFromRow,
+  budgetAllocationToRow,
   siteToRow,
   vehicleToRow,
   expenseToRow,
@@ -51,7 +54,7 @@ import {
   type QueuedItem,
 } from '@/lib/offlineQueue';
 import { generateId } from '@/lib/id';
-import { buildNotificationRows } from '@/lib/notificationScenarios';
+import { buildNotificationRows, buildNotificationRowForUser } from '@/lib/notificationScenarios';
 import { showSystemNotificationWithData } from '@/lib/localNotifications';
 
 export interface MockAppStoreState {
@@ -65,6 +68,7 @@ export interface MockAppStoreState {
   siteAssignments: SiteAssignment[];
   users: User[];
   driverVehicleAssignments: DriverVehicleAssignment[];
+  budgetAllocations: BudgetAllocation[];
   contractRateRwf: number;
   tasks: Task[];
   operations: Operation[];
@@ -122,6 +126,7 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   /** Import website-only vehicles (Umugwaneza) into the app. Returns count synced. */
   syncFromWebsiteVehicles: () => Promise<{ syncedCount: number }>;
   addSite: (site: Site) => Promise<void>;
+  addBudgetAllocation: (siteId: string, amountRwf: number, allocatedById?: string) => Promise<void>;
   setDriverVehicleAssignment: (siteId: string, driverId: string, vehicleIds: string[]) => Promise<void>;
   updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
   addReport: (report: Report) => Promise<void>;
@@ -146,6 +151,7 @@ const emptyState: MockAppStoreState = {
   siteAssignments: [],
   users: [],
   driverVehicleAssignments: [],
+  budgetAllocations: [],
   contractRateRwf: defaultContractRate,
   tasks: [],
   operations: [],
@@ -203,6 +209,13 @@ function useSupabaseStore(): MockAppStoreContextValue {
         supabase.from('profiles').select('*'),
       ]);
 
+      let budgetAllocations: BudgetAllocation[] = [];
+      const budgetAllocationsRes = await supabase.from('site_budget_allocations').select('*').order('allocated_at', { ascending: true });
+      if (!budgetAllocationsRes.error) {
+        budgetAllocations = (budgetAllocationsRes.data ?? []).map((r) => budgetAllocationFromRow(r as Record<string, unknown>));
+      }
+      // If table does not exist (migration 20250305100000 not run), budgetAllocations stays []
+
       const sites = (sitesRes.data ?? []).map((r) => siteFromRow(r as Record<string, unknown>));
       const vehicles = (vehiclesRes.data ?? []).map((r) => vehicleFromRow(r as Record<string, unknown>));
       const expenses = (expensesRes.data ?? []).map((r) => expenseFromRow(r as Record<string, unknown>));
@@ -215,10 +228,9 @@ function useSupabaseStore(): MockAppStoreContextValue {
       const tasks = (tasksRes.data ?? []).map((r) => taskFromRow(r as Record<string, unknown>));
       const operations = (operationsRes.data ?? []).map((r) => operationFromRow(r as Record<string, unknown>));
       const reports = (reportsRes.data ?? []).map((r) => reportFromRow(r as Record<string, unknown>));
-      const profileRows = (profilesRes.data ?? []).filter(
-        (r: Record<string, unknown>) => r.source !== 'umugwaneza'
-      );
-      const users = profileRows.map((r) => profileFromRow(r as Record<string, unknown>));
+      // Include all profiles so Assistant Supervisor can see full team info
+      const profileRows = (profilesRes.data ?? []) as Record<string, unknown>[];
+      const users = profileRows.map((r) => profileFromRow(r));
       const userSiteMap = new Map<string, string[]>();
       siteAssignments.forEach((a) => {
         const arr = userSiteMap.get(a.userId) ?? [];
@@ -258,6 +270,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
         siteAssignments,
         users,
         driverVehicleAssignments,
+        budgetAllocations,
         contractRateRwf,
         tasks,
         operations,
@@ -369,21 +382,57 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, []);
 
   const updateSite = useCallback(async (id: string, patch: Partial<Site>) => {
-    const row = siteToRow(patch);
+    const site = state.sites.find((s) => s.id === id);
+    const nextPatch = { ...patch };
+    if (patch.status === 'completed' && site && !site.actualCompletedAt) {
+      nextPatch.actualCompletedAt = new Date().toISOString();
+    }
+    const row = siteToRow(nextPatch);
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from('sites').update(row).eq('id', id);
     if (error) throw error;
     await refetch();
-  }, [refetch]);
+  }, [refetch, state.sites]);
 
   const addSite = useCallback(async (site: Site) => {
     const row = siteToRow(site);
     const { error } = await supabase.from('sites').insert(row);
     if (error) throw error;
+    if (site.budget > 0) {
+      const allocRow = budgetAllocationToRow({
+        siteId: site.id,
+        amountRwf: site.budget,
+        allocatedAt: new Date().toISOString(),
+        allocatedById: authUser?.id ?? undefined,
+      });
+      const { error: allocError } = await supabase.from('site_budget_allocations').insert(allocRow);
+      if (allocError) {
+        throw new Error(
+          allocError.message ||
+            'Site was created but initial budget could not be recorded. Please use Allocate budget to add it.'
+        );
+      }
+    }
     const siteRows = buildNotificationRows('site_added', { ...site, name: site.name, location: site.location }, () => generateId('n'));
     for (const r of siteRows) await supabase.from('notifications').insert(r);
+    refetch().catch(() => {});
+  }, [refetch, authUser?.id]);
+
+  const addBudgetAllocation = useCallback(async (siteId: string, amountRwf: number, allocatedById?: string) => {
+    const allocRow = budgetAllocationToRow({
+      siteId,
+      amountRwf,
+      allocatedAt: new Date().toISOString(),
+      allocatedById: allocatedById ?? authUser?.id,
+    });
+    const { error: insertErr } = await supabase.from('site_budget_allocations').insert(allocRow);
+    if (insertErr) throw insertErr;
+    const site = state.sites.find((s) => s.id === siteId);
+    const newBudget = (site?.budget ?? 0) + amountRwf;
+    const { error: updateErr } = await supabase.from('sites').update({ budget: newBudget }).eq('id', siteId);
+    if (updateErr) throw updateErr;
     await refetch();
-  }, [refetch]);
+  }, [refetch, authUser?.id, state.sites]);
 
   const syncFromWebsiteVehicles = useCallback(async (): Promise<{ syncedCount: number }> => {
     const { data, error } = await supabase.rpc('sync_website_vehicles_to_app');
@@ -417,10 +466,20 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, [refetch, state.sites]);
 
   const updateVehicle = useCallback(async (id: string, patch: Partial<Vehicle>) => {
-    const { vehicleNumberOrId: _omit, ...patchWithoutNumber } = patch;
-    const row = vehicleToRow(patchWithoutNumber);
+    const trimmedId = String(id ?? '').trim();
+    if (!trimmedId) throw new Error('Vehicle id is required.');
+    const norm = (x: string) => String(x ?? '').trim().toLowerCase();
+    const current = state.vehicles.find((v) => norm(v.id) === norm(trimmedId));
+    if (!current) throw new Error('Vehicle not found. Please refresh and try again.');
+    const merged: Vehicle = { ...current, ...patch };
+    const { vehicleNumberOrId: _omit, ...patchOnly } = patch;
+    const row = vehicleToRow(patchOnly);
     if (Object.keys(row).length === 0) return;
-    const { error } = await supabase.from('vehicles').update(row).eq('id', id);
+    const { data: updatedRows, error } = await supabase
+      .from('vehicles')
+      .update(row)
+      .eq('id', trimmedId)
+      .select();
     if (error) {
       const msg = error.message || '';
       if (/stack depth|recursion|limit exceeded/i.test(msg)) {
@@ -428,15 +487,19 @@ function useSupabaseStore(): MockAppStoreContextValue {
       }
       throw new Error(msg || 'Failed to save vehicle. Please try again.');
     }
-    const vehicle = state.vehicles.find((v) => v.id === id);
-    if (vehicle) {
-      const siteName = state.sites.find((s) => s.id === (patch.siteId ?? vehicle.siteId))?.name;
-      const vehicleNumberOrId = patch.vehicleNumberOrId ?? vehicle.vehicleNumberOrId;
-      const vehicleRows = buildNotificationRows('vehicle_updated', { id, vehicleNumberOrId, siteName }, () => generateId('n'));
-      for (const r of vehicleRows) await supabase.from('notifications').insert(r);
-    }
-    await refetch();
-  }, [refetch, state.vehicles, state.sites]);
+    const updated =
+      updatedRows && updatedRows.length > 0
+        ? vehicleFromRow(updatedRows[0] as Record<string, unknown>)
+        : merged;
+    setState((prev) => ({
+      ...prev,
+      vehicles: prev.vehicles.map((v) => (norm(v.id) === norm(trimmedId) ? updated : v)),
+    }));
+    const siteName = state.sites.find((s) => s.id === (patch.siteId ?? updated.siteId))?.name;
+    const vehicleNumberOrId = patch.vehicleNumberOrId ?? updated.vehicleNumberOrId;
+    const vehicleRows = buildNotificationRows('vehicle_updated', { id: trimmedId, vehicleNumberOrId, siteName }, () => generateId('n'));
+    for (const r of vehicleRows) await supabase.from('notifications').insert(r);
+  }, [state.vehicles, state.sites]);
 
   const addExpense = useCallback(async (expense: Expense) => {
     const row = expenseToRow(expense);
@@ -567,7 +630,11 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, [refetch, state.sites]);
 
   const updateIssue = useCallback(async (id: string, patch: Partial<Issue>) => {
-    const row = issueToRow(patch);
+    const payload = { ...patch };
+    if (patch.status === 'resolved') {
+      payload.imageUris = [];
+    }
+    const row = issueToRow(payload);
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from('issues').update(row).eq('id', id);
     if (error) throw error;
@@ -673,8 +740,27 @@ function useSupabaseStore(): MockAppStoreContextValue {
     const siteName = state.sites.find((s) => s.id === siteId)?.name;
     const driverRows = buildNotificationRows('driver_vehicle_assignment', { siteId, siteName, vehicleIds }, () => generateId('n'));
     for (const r of driverRows) await supabase.from('notifications').insert(r);
+    if (driverId && vehicleIds.length > 0) {
+      const driver = state.users.find((u) => u.id === driverId);
+      const vehicleLabels = vehicleIds
+        .map((vid) => state.vehicles.find((v) => v.id === vid)?.vehicleNumberOrId ?? vid)
+        .join(', ');
+      const firstVehicle = state.vehicles.find((v) => v.id === vehicleIds[0]);
+      const vehicleType = firstVehicle?.type === 'machine' ? 'Machine' : 'Truck';
+      const body = `You are allocated to ${vehicleLabels} (${vehicleType}) under ${siteName ?? 'this site'}.`;
+      const personalRow = buildNotificationRowForUser(
+        driver?.role ?? 'driver_truck',
+        driverId,
+        'Allocated to vehicle',
+        body,
+        () => generateId('n'),
+        siteId,
+        'site'
+      );
+      await supabase.from('notifications').insert(personalRow);
+    }
     await refetch();
-  }, [refetch, state.sites]);
+  }, [refetch, state.sites, state.users, state.vehicles]);
 
   const updateTask = useCallback(async (id: string, patch: Partial<Task>) => {
     const row = taskToRow(patch);
@@ -774,6 +860,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       refetch,
       syncFromWebsiteVehicles,
       addSite,
+      addBudgetAllocation,
       setDriverVehicleAssignment,
       updateTask,
       addReport,
@@ -815,6 +902,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       refetch,
       syncFromWebsiteVehicles,
       addSite,
+      addBudgetAllocation,
       setDriverVehicleAssignment,
       updateTask,
       addReport,

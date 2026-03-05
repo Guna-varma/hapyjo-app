@@ -6,6 +6,7 @@ export { EmptyState } from './EmptyState';
 export { FilterChips } from './FilterChips';
 export type { FilterChipOption } from './FilterChips';
 export { FormModal } from './FormModal';
+export { FormScreenLayout } from './FormScreenLayout';
 export { Header } from './Header';
 export { Input } from './Input';
 export { InfoButton } from './InfoButton';

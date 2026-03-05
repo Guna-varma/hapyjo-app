@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '@/theme/tokens';
 
@@ -50,6 +50,16 @@ export function useToast(): ToastContextValue {
   return ctx;
 }
 
+const toastShadow = Platform.select({
+  web: { boxShadow: '0 2px 4px rgba(0,0,0,0.25)' as const },
+  default: {
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+});
+
 const styles = StyleSheet.create({
   toast: {
     position: 'absolute',
@@ -61,10 +71,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
+    ...toastShadow,
   },
   toastText: {
     color: colors.surface,

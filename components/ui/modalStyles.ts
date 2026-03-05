@@ -79,9 +79,14 @@ export const modalStyles = StyleSheet.create({
     borderRadius: form.inputRadius,
     paddingHorizontal: form.inputPadding,
     paddingVertical: form.inputPadding,
-    fontSize: typography.body.fontSize,
+    fontSize: form.inputFontSize,
     color: colors.text,
     backgroundColor: colors.surface,
-    minHeight: 48,
+    minHeight: form.inputMinHeight,
+    maxHeight: form.inputMaxHeight,
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+    borderWidth: 2,
   },
 });

@@ -181,6 +181,7 @@ export function TaskDetailScreen({ task, onBack }: TaskDetailScreenProps) {
                 placeholder={t('task_progress_placeholder')}
                 value={progress}
                 onChangeText={setProgress}
+                onFocus={() => { if (progress === '0') setProgress(''); }}
                 keyboardType="numeric"
               />
               <Button onPress={handleUpdateProgress} loading={loading}>

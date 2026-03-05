@@ -4,7 +4,8 @@ import { Card } from '@/components/ui/Card';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Badge } from '@/components/ui/Badge';
 import { formatAmount } from '@/lib/currency';
-import { MapPin, Banknote, TrendingUp } from 'lucide-react-native';
+import { formatDateLabel } from '@/components/ui/DatePickerField';
+import { MapPin, Banknote, TrendingUp, Calendar } from 'lucide-react-native';
 import { Site } from '@/types';
 import { useLocale } from '@/context/LocaleContext';
 
@@ -26,7 +27,7 @@ export function SiteCard({ site, onPress }: SiteCardProps) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
       <Card className="mb-3">
-        <View className="flex-row items-start justify-between mb-3">
+        <View className="flex-row items-start justify-between mb-2">
           <View className="flex-1">
             <Text className="text-lg font-bold text-gray-900">{site.name}</Text>
             <View className="flex-row items-center mt-1">
@@ -35,6 +36,22 @@ export function SiteCard({ site, onPress }: SiteCardProps) {
             </View>
           </View>
           <Badge variant={statusVariant[site.status]}>{site.status}</Badge>
+        </View>
+
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 mb-3">
+          <View className="flex-row items-center">
+            <Calendar size={14} color="#6B7280" />
+            <Text className="text-xs text-gray-600 ml-1">{t('site_start_date')}:</Text>
+            <Text className="text-xs font-medium text-gray-800 ml-1">
+              {site.startDate ? formatDateLabel(site.startDate.slice(0, 10)) : '—'}
+            </Text>
+          </View>
+          <View className="flex-row items-center">
+            <Text className="text-xs text-gray-600">{t('site_expected_end_date')}:</Text>
+            <Text className="text-xs font-medium text-gray-800 ml-1">
+              {site.expectedEndDate ? formatDateLabel(site.expectedEndDate.slice(0, 10)) : '—'}
+            </Text>
+          </View>
         </View>
 
         <View className="mb-3">

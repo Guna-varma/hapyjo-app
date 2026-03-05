@@ -35,7 +35,7 @@ export interface Vehicle {
   type: VehicleType;
   vehicleNumberOrId: string;
   mileageKmPerLitre?: number;
-  /** Machine only: fuel consumption in L/hour (Lt/hour). */
+  /** Machine only: hours per litre (hr/L) — operating hours per litre of fuel. */
   hoursPerLitre?: number;
   /** Truck only: load capacity in tons (for rental/customer info). */
   capacityTons?: number;
@@ -56,6 +56,10 @@ export interface Site {
   location: string;
   status: 'active' | 'inactive' | 'completed';
   startDate: string;
+  /** Expected end date (target); Head Supervisor can edit. */
+  expectedEndDate?: string;
+  /** Set when status becomes 'completed' (actual completion time). */
+  actualCompletedAt?: string;
   budget: number;
   spent: number;
   progress: number;
@@ -66,6 +70,15 @@ export interface Site {
   vehicleIds?: string[];
   /** When updating, pass null to clear the rate. */
   contractRateRwf?: number | null;
+}
+
+/** One row per budget allocation (additive). Total site budget = sum of allocations. */
+export interface BudgetAllocation {
+  id: string;
+  siteId: string;
+  amountRwf: number;
+  allocatedAt: string;
+  allocatedById?: string;
 }
 
 export interface Task {
