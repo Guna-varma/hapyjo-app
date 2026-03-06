@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, ActivityIndicator, useWindowDimensions, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { LoadingProvider } from '@/context/LoadingContext';
 import { MockAppStoreProvider } from '@/context/MockAppStoreContext';
 import { ToastProvider } from '@/context/ToastContext';
 import { NotificationNavigationProvider } from '@/context/NotificationNavigationContext';
@@ -104,10 +105,12 @@ export default function HomeScreen() {
       <LocaleProvider>
         <MockAppStoreProvider>
           <ToastProvider>
-            <RequestLocationPermissionOnAppOpen />
-            <View style={{ flex: 1 }}>
-              <AppContent />
-            </View>
+            <LoadingProvider>
+              <RequestLocationPermissionOnAppOpen />
+              <View style={{ flex: 1 }}>
+                <AppContent />
+              </View>
+            </LoadingProvider>
           </ToastProvider>
         </MockAppStoreProvider>
       </LocaleProvider>

@@ -129,6 +129,7 @@ export function tripFromRow(row: Record<string, unknown>): Trip {
     status: row.status as Trip['status'],
     fuelFilledAtStart: row.fuel_filled_at_start != null ? Number(row.fuel_filled_at_start) : undefined,
     fuelConsumed: row.fuel_consumed != null ? Number(row.fuel_consumed) : undefined,
+    startPhotoUri: row.start_photo_uri != null ? String(row.start_photo_uri) : undefined,
     photoUri: row.photo_uri != null ? String(row.photo_uri) : undefined,
     createdAt: row.created_at != null ? String(row.created_at) : '',
   };
@@ -461,12 +462,70 @@ export function tripToRow(t: Partial<Trip>): Record<string, unknown> {
   if (t.currentLon !== undefined) row.current_lon = t.currentLon ?? null;
   if (t.locationUpdatedAt !== undefined) row.location_updated_at = t.locationUpdatedAt ?? null;
   if (t.distanceKm != null) row.distance_km = t.distanceKm;
-  if (t.loadQuantity !== undefined) row.load_quantity = t.loadQuantity;
+  if (t.loadQuantity !== undefined) row.load_quantity = t.loadQuantity ?? null;
   if (t.status != null) row.status = t.status;
-  if (t.fuelFilledAtStart !== undefined) row.fuel_filled_at_start = t.fuelFilledAtStart;
-  if (t.fuelConsumed !== undefined) row.fuel_consumed = t.fuelConsumed;
-  if (t.photoUri !== undefined) row.photo_uri = t.photoUri;
+  if (t.fuelFilledAtStart !== undefined) row.fuel_filled_at_start = t.fuelFilledAtStart ?? null;
+  if (t.fuelConsumed !== undefined) row.fuel_consumed = t.fuelConsumed ?? null;
+  if (t.startPhotoUri !== undefined) row.start_photo_uri = t.startPhotoUri ?? null;
+  if (t.photoUri !== undefined) row.photo_uri = t.photoUri ?? null;
   return row;
+}
+
+/**
+ * Remove undefined values from a row so PostgREST never receives undefined (avoids 400 Bad Request).
+ * Also removes `id` when doing UPDATE so we don't try to change the primary key.
+ */
+export function stripUndefinedAndId<T extends Record<string, unknown>>(
+  row: T,
+  options: { omitId?: boolean } = {}
+): Record<string, unknown> {
+  const { omitId = true } = options;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (omitId && k === 'id') continue;
+    if (v === undefined) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Allowed columns for trips UPDATE (PostgREST can 400 on unknown or wrong-type columns). */
+const TRIPS_UPDATE_KEYS = new Set([
+  'end_time', 'start_lat', 'start_lon', 'end_lat', 'end_lon',
+  'current_lat', 'current_lon', 'location_updated_at', 'distance_km',
+  'load_quantity', 'status', 'fuel_filled_at_start', 'fuel_consumed', 'photo_uri',
+]);
+
+function toNum(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Build a safe trip UPDATE payload: only allowed keys, numeric columns as numbers, no undefined.
+ * Use this for PATCH /trips to avoid 400 Bad Request.
+ */
+export function tripUpdatePayload(patch: Partial<Trip>): Record<string, unknown> {
+  const row = tripToRow(patch);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (k === 'id') continue;
+    if (v === undefined) continue;
+    if (!TRIPS_UPDATE_KEYS.has(k)) continue;
+    if (['start_lat', 'start_lon', 'end_lat', 'end_lon', 'current_lat', 'current_lon', 'distance_km', 'fuel_filled_at_start', 'fuel_consumed'].includes(k)) {
+      const n = toNum(v);
+      if (n !== null) out[k] = n;
+      else if (v === null) out[k] = null;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 export function machineSessionToRow(m: Partial<MachineSession>): Record<string, unknown> {

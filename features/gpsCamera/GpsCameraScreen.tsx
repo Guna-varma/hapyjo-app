@@ -278,7 +278,7 @@ export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
             <Text style={styles.hint}>{t('work_photo_upload_from_gallery_hint')}</Text>
             {uploadSuccess && (
               <View style={styles.successRow}>
-                <CheckCircle size={20} color={colors.success} />
+                <CheckCircle size={20} color={colors.successText} />
                 <Text style={styles.successText}>{t('work_photo_upload_success')}</Text>
               </View>
             )}
@@ -393,10 +393,10 @@ function makeStyles(theme: ReturnType<typeof useResponsiveTheme>) {
       marginTop: spacing.sm,
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
-      backgroundColor: colors.backgroundSecondary ?? colors.background,
+      backgroundColor: colors.gray100 ?? colors.background,
       borderRadius: 8,
     },
-    successText: { color: colors.success ?? '#22c55e', fontSize: theme.fontSizeBase, fontWeight: '600' },
+    successText: { color: colors.successText, fontSize: theme.fontSizeBase, fontWeight: '600' },
     galleryBtn: {
       flexDirection: 'row',
       alignItems: 'center',

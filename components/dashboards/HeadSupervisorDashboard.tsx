@@ -16,7 +16,7 @@ import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 /** Head Supervisor allocates vehicles to sites (Vehicles tab). Driver/operator assignment is done by Assistant Supervisor only. */
 export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { t } = useLocale();
-  const { sites, surveys } = useMockAppStore();
+  const { sites, surveys, trips, machineSessions, assignedTrips } = useMockAppStore();
   const [tasksSiteId, setTasksSiteId] = useState<string | null>(null);
   const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
   const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
@@ -115,6 +115,31 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
             onPressDate={onNavigateTab ? (date) => onNavigateTab('surveys', { filterByDate: date }) : undefined}
           />
         </Card>
+        {(() => {
+          const approvedTrips = assignedTrips.filter((a) => a.status === 'TRIP_COMPLETED');
+          const approvedTasks = assignedTrips.filter((a) => a.status === 'TASK_COMPLETED');
+          const hasFleet = approvedTrips.length > 0 || approvedTasks.length > 0;
+          if (!hasFleet) return null;
+          const completedTrips = trips.filter((tr) => tr.status === 'completed');
+          const completedSessions = machineSessions.filter((m) => m.status === 'completed');
+          const totalFuel = completedTrips.reduce((s, tr) => s + (tr.fuelConsumed ?? 0), 0) + completedSessions.reduce((s, m) => s + (m.fuelConsumed ?? 0), 0);
+          const totalDistance = completedTrips.reduce((s, tr) => s + (tr.distanceKm ?? 0), 0);
+          const totalHours = completedSessions.reduce((s, m) => s + (m.durationHours ?? 0), 0);
+          return (
+            <Card style={[hsStyles.quickCard, { marginBottom: layout.cardSpacingVertical }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Truck size={20} color={colors.primary} style={{ marginRight: 6 }} />
+                <Text style={hsStyles.quickTitle}>{t('dashboard_fleet_trips_title')}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                <Text style={hsStyles.statLabel}>{t('dashboard_fleet_total_fuel')}: {totalFuel.toFixed(1)} L</Text>
+                <Text style={hsStyles.statLabel}>{t('dashboard_fleet_total_distance')}: {totalDistance.toFixed(0)} km</Text>
+                <Text style={hsStyles.statLabel}>{t('dashboard_fleet_total_hours')}: {totalHours.toFixed(1)} h</Text>
+              </View>
+              <Text style={[hsStyles.statLabel, { marginTop: 4, fontSize: 11 }]}>{t('dashboard_fleet_approved_by_as')}</Text>
+            </Card>
+          );
+        })()}
         {sites.length > 0 && (
           <View style={hsStyles.section}>
             <Text style={hsStyles.sectionTitle}>{t('dashboard_site_locations')}</Text>

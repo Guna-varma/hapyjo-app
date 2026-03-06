@@ -52,6 +52,7 @@ import {
   vehicleToRow,
   expenseToRow,
   tripToRow,
+  tripUpdatePayload,
   machineSessionToRow,
   surveyToRow,
   issueToRow,
@@ -79,7 +80,8 @@ import {
 } from "@/lib/notificationScenarios";
 import { showSystemNotificationWithData } from "@/lib/localNotifications";
 import { deleteIssueImagesFromStorage } from "@/lib/issueImageStorage";
-import { canTransition, getTripTransitionRole } from "@/lib/tripLifecycle";
+import { getTripTransitionRole, assertValidTransition } from "@/lib/tripLifecycle";
+import { safeDbWrite, getDbErrorMessage } from "@/lib/safeDbWrite";
 
 export interface MockAppStoreState {
   sites: Site[];
@@ -1031,14 +1033,15 @@ function useSupabaseStore(): MockAppStoreContextValue {
   const addTrip = useCallback(
     async (trip: Trip) => {
       const row = tripToRow(trip);
-      const { error } = await supabase.from("trips").insert(row);
-      if (error) {
-        await appendToOfflineQueue({
-          type: "trip",
-          payload: trip as unknown as Record<string, unknown>,
-        });
-        setState((prev) => ({ ...prev, trips: [...prev.trips, trip] }));
-        return;
+      const result = await safeDbWrite(
+        async () => {
+          const { error } = await supabase.from("trips").insert(row);
+          if (error) throw error;
+        },
+        { retryOnceOnNetwork: true }
+      );
+      if (!result.ok) {
+        throw new Error(getDbErrorMessage(result.error, result.error.message));
       }
       if (trip.status === "in_progress") {
         const siteName = state.sites.find((s) => s.id === trip.siteId)?.name;
@@ -1075,10 +1078,18 @@ function useSupabaseStore(): MockAppStoreContextValue {
 
   const updateTrip = useCallback(
     async (id: string, patch: Partial<Trip>) => {
-      const row = tripToRow(patch);
+      const row = tripUpdatePayload(patch);
       if (Object.keys(row).length === 0) return;
-      const { error } = await supabase.from("trips").update(row).eq("id", id);
-      if (error) throw error;
+      const result = await safeDbWrite(
+        async () => {
+          const { error } = await supabase.from("trips").update(row).eq("id", id);
+          if (error) throw error;
+        },
+        { retryOnceOnNetwork: true }
+      );
+      if (!result.ok) {
+        throw new Error(getDbErrorMessage(result.error, result.error.message));
+      }
       const trip = state.trips.find((t) => t.id === id);
       if (trip) {
         const siteName = state.sites.find((s) => s.id === trip.siteId)?.name;
@@ -1296,14 +1307,23 @@ function useSupabaseStore(): MockAppStoreContextValue {
       photo: Omit<WorkPhoto, "id" | "createdAt" | "siteName" | "uploadedByName">
     ) => {
       const row = workPhotoToRow(photo);
-      const { data, error } = await supabase
-        .from("work_photos")
-        .insert(row)
-        .select()
-        .single();
-      if (error) throw error;
+      const result = await safeDbWrite(
+        async () => {
+          const { data, error } = await supabase
+            .from("work_photos")
+            .insert(row)
+            .select()
+            .single();
+          if (error) throw error;
+          return workPhotoFromRow((data ?? photo) as Record<string, unknown>);
+        },
+        { retryOnceOnNetwork: true }
+      );
+      if (!result.ok) {
+        throw new Error(getDbErrorMessage(result.error, result.error.message));
+      }
       await refetch();
-      return workPhotoFromRow((data ?? photo) as Record<string, unknown>);
+      return result.data!;
     },
     [refetch]
   );
@@ -1542,14 +1562,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       const role = currentUser ? getTripTransitionRole(currentUser.role) : null;
       if (role == null)
         throw new Error("You are not allowed to change this trip status.");
-      if (!canTransition(current.status, toStatus, role)) {
-        const { getTransitionErrorMessage } = await import(
-          "@/lib/tripLifecycle"
-        );
-        throw new Error(
-          getTransitionErrorMessage(current.status, toStatus, role)
-        );
-      }
+      assertValidTransition(current.status, toStatus, role);
       const patch: Partial<AssignedTrip> = { status: toStatus };
       const now = new Date().toISOString();
       if (toStatus === "TRIP_STARTED" || toStatus === "TASK_STARTED")
@@ -1588,11 +1601,19 @@ function useSupabaseStore(): MockAppStoreContextValue {
       delete (row as Record<string, unknown>).driver_id;
       delete (row as Record<string, unknown>).created_by;
       delete (row as Record<string, unknown>).created_at;
-      const { error } = await supabase
-        .from("assigned_trips")
-        .update(row)
-        .eq("id", id);
-      if (error) throw error;
+      const result = await safeDbWrite(
+        async () => {
+          const { error } = await supabase
+            .from("assigned_trips")
+            .update(row)
+            .eq("id", id);
+          if (error) throw error;
+        },
+        { retryOnceOnNetwork: true }
+      );
+      if (!result.ok) {
+        throw new Error(getDbErrorMessage(result.error, result.error.message));
+      }
       if (
         toStatus === "TRIP_NEED_APPROVAL" ||
         toStatus === "TASK_NEED_APPROVAL"

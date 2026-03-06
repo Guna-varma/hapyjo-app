@@ -7,7 +7,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 
 const BUCKET = 'work-photos';
 const PREFIX = 'work/';
-const TARGET_PHOTO_BYTES = 50 * 1024;
+/** Max size for trip proof photos (speedometer start/end). Lightweight: compress to 50KB. */
+const MAX_PHOTO_BYTES = 50 * 1024;
 const TARGET_THUMB_BYTES_MAX = 20 * 1024;
 const MIN_ACCEPTED_BYTES = 30 * 1024;
 const MAX_WIDTH = 1280;
@@ -50,18 +51,18 @@ export async function validateAndPrepareWorkPhoto(localUri: string): Promise<{ u
   if (size === 0) {
     throw new Error('Image file is empty.');
   }
-  // Always compress to 30–50 KB when over target; no upper size limit (compress any size).
-  if (size <= TARGET_PHOTO_BYTES && size >= MIN_ACCEPTED_BYTES) {
+  // Keep if already within 30–50 KB; otherwise compress to max 50 KB (lightweight).
+  if (size <= MAX_PHOTO_BYTES && size >= MIN_ACCEPTED_BYTES) {
     return { uri: localUri, size };
   }
   if (size < MIN_ACCEPTED_BYTES) {
     return { uri: localUri, size };
   }
-  // Over 50 KB: always compress to 30–50 KB (any input size)
-  return compressToTargetSize(localUri);
+  // Over 50 KB: compress to max 50 KB (trip proof photos stay lightweight).
+  return compressToMaxSize(localUri);
 }
 
-async function compressToTargetSize(localUri: string): Promise<{ uri: string; size: number }> {
+async function compressToMaxSize(localUri: string): Promise<{ uri: string; size: number }> {
   const attempts: { width: number; quality: number }[] = [
     { width: MAX_WIDTH, quality: PHOTO_QUALITY },
     { width: MAX_WIDTH, quality: PHOTO_QUALITY_LOW },
@@ -78,7 +79,7 @@ async function compressToTargetSize(localUri: string): Promise<{ uri: string; si
     if (!res.uri) continue;
     result = res;
     const outSize = await getUriSizeInBytes(res.uri);
-    if (outSize <= TARGET_PHOTO_BYTES) break;
+    if (outSize <= MAX_PHOTO_BYTES) break;
   }
   if (!result?.uri) throw new Error('Compression produced no output');
   const finalSize = await getUriSizeInBytes(result.uri);
@@ -115,10 +116,12 @@ async function uriToArrayBuffer(uri: string): Promise<ArrayBuffer> {
   return bytes.buffer;
 }
 
-export async function uploadWorkPhoto(photoId: string, photoUri: string, thumbUri: string): Promise<{ photoUrl: string; thumbnailUrl: string }> {
-  const photoPath = `${PREFIX}${photoId}/photo-${Date.now()}.jpg`;
-  const thumbPath = `${PREFIX}${photoId}/thumb-${Date.now()}.jpg`;
-  const [photoBuf, thumbBuf] = await Promise.all([uriToArrayBuffer(photoUri), uriToArrayBuffer(thumbUri)]);
+async function uploadOnce(
+  photoPath: string,
+  thumbPath: string,
+  photoBuf: ArrayBuffer,
+  thumbBuf: ArrayBuffer
+): Promise<{ photoUrl: string; thumbnailUrl: string }> {
   const { error: e1 } = await supabase.storage.from(BUCKET).upload(photoPath, photoBuf, { contentType: 'image/jpeg', upsert: true });
   if (e1) throw new Error(`Upload failed: ${e1.message}`);
   const { error: e2 } = await supabase.storage.from(BUCKET).upload(thumbPath, thumbBuf, { contentType: 'image/jpeg', upsert: true });
@@ -126,4 +129,24 @@ export async function uploadWorkPhoto(photoId: string, photoUri: string, thumbUr
   const { data: photoUrlData } = supabase.storage.from(BUCKET).getPublicUrl(photoPath);
   const { data: thumbUrlData } = supabase.storage.from(BUCKET).getPublicUrl(thumbPath);
   return { photoUrl: photoUrlData.publicUrl, thumbnailUrl: thumbUrlData.publicUrl };
+}
+
+/** Retry once on network failure. Upload before DB write; no orphan DB records. */
+export async function uploadWorkPhoto(photoId: string, photoUri: string, thumbUri: string): Promise<{ photoUrl: string; thumbnailUrl: string }> {
+  const photoPath = `${PREFIX}${photoId}/photo-${Date.now()}.jpg`;
+  const thumbPath = `${PREFIX}${photoId}/thumb-${Date.now()}.jpg`;
+  const [photoBuf, thumbBuf] = await Promise.all([uriToArrayBuffer(photoUri), uriToArrayBuffer(thumbUri)]);
+  const isNetworkErr = (e: Error) => /fetch|network|connection|failed/i.test(e.message);
+  try {
+    return await uploadOnce(photoPath, thumbPath, photoBuf, thumbBuf);
+  } catch (first) {
+    if (isNetworkErr(first instanceof Error ? first : new Error(String(first)))) {
+      try {
+        return await uploadOnce(photoPath, thumbPath, photoBuf, thumbBuf);
+      } catch (second) {
+        throw second;
+      }
+    }
+    throw first;
+  }
 }

@@ -218,3 +218,74 @@ export function getCompletedStatus(current: AssignedTripStatus): AssignedTripSta
   const prefix = current.startsWith('TRIP_') ? 'TRIP' : current.startsWith('TASK_') ? 'TASK' : null;
   return prefix != null ? statusFromPhase('COMPLETED', prefix as 'TRIP' | 'TASK') : null;
 }
+
+/** Pause segment for duration calculation (assignment-level only; do not create new trip on pause/resume). */
+export type PauseSegment = { startedAt: string; endedAt: string };
+
+/**
+ * Check if the driver can end this trip (trip in progress, assignment in an endable state, user owns both).
+ */
+export function canEndTrip(
+  trip: { id: string; driverId: string; status: string },
+  assignment: { driverId: string; status: AssignedTripStatus } | null,
+  userId: string
+): boolean {
+  if (trip.driverId !== userId || trip.status !== 'in_progress') return false;
+  if (!assignment || assignment.driverId !== userId) return true;
+  const phase = getPhase(assignment.status);
+  return phase === 'STARTED' || phase === 'PAUSED' || phase === 'RESUMED' || phase === 'IN_PROGRESS';
+}
+
+/**
+ * Check if the driver can start a trip (no other in-progress trip, assignment in ASSIGNED/PENDING).
+ */
+export function canStartTrip(
+  assignment: { driverId: string; status: AssignedTripStatus } | null,
+  userId: string,
+  hasOtherActiveTrip: boolean
+): boolean {
+  if (hasOtherActiveTrip) return false;
+  if (!assignment) return true;
+  if (assignment.driverId !== userId) return false;
+  const phase = getPhase(assignment.status);
+  return phase === 'ASSIGNED' || phase === 'PENDING';
+}
+
+/**
+ * Assert valid transition; throws with getTransitionErrorMessage if invalid.
+ */
+export function assertValidTransition(
+  fromStatus: AssignedTripStatus,
+  toStatus: AssignedTripStatus,
+  role: TripTransitionRole
+): void {
+  if (!canTransition(fromStatus, toStatus, role)) {
+    throw new Error(getTransitionErrorMessage(fromStatus, toStatus, role));
+  }
+}
+
+/**
+ * Effective trip duration in hours: (endTime - startTime) minus total_pause_time.
+ * total_pause_time is derived from pauseSegments; do not rely on frontend timers.
+ * Use for trips: pass trip.startTime, trip.endTime, and optional pauseSegments from AssignedTrip.
+ * Recalculate server-side when needed for reports/fuel.
+ */
+export function getEffectiveDurationHours(
+  startTime: string,
+  endTime: string | undefined,
+  pauseSegments?: PauseSegment[] | null
+): number {
+  if (!endTime || !startTime) return 0;
+  const start = new Date(startTime).getTime();
+  const end = new Date(endTime).getTime();
+  let pauseMs = 0;
+  if (pauseSegments && pauseSegments.length > 0) {
+    for (const seg of pauseSegments) {
+      if (seg.startedAt && seg.endedAt) {
+        pauseMs += new Date(seg.endedAt).getTime() - new Date(seg.startedAt).getTime();
+      }
+    }
+  }
+  const totalMs = Math.max(0, end - start - pauseMs);
+  return totalMs / (1000 * 60 * 60);
+}

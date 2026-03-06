@@ -17,11 +17,15 @@ import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
+import { useLoading } from '@/context/LoadingContext';
+import { useToast } from '@/context/ToastContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { getCurrentPositionWithTimeout, getCoordsWithTimeout, getCoordsForTripEnd } from '@/lib/getCurrentPositionWithTimeout';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { generateId } from '@/lib/id';
 import { Play, Square, Fuel, MapPin, Camera, Pause, PlayCircle, CheckCircle } from 'lucide-react-native';
-import { getNextDriverStatus, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
+import { getNextDriverStatus, getEffectiveDurationHours, canEndTrip, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
+import { categorizeError, ERROR_CATEGORY_TITLE_KEYS } from '@/lib/errorCategories';
 import * as Linking from 'expo-linking';
 import {
   validateAndPrepareWorkPhoto,
@@ -30,8 +34,6 @@ import {
   isAllowedImageFormat,
 } from '@/lib/workPhotoUpload';
 import { parseExifGps } from '@/lib/workPhotoExif';
-
-const LIVE_LOCATION_INTERVAL_MS = 30000;
 
 function haversineKm(
   lat1: number,
@@ -62,6 +64,8 @@ export function DriverTripsScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
+  const { withLoading, showLoading, hideLoading } = useLoading();
+  const { showToast } = useToast();
   const {
     sites,
     vehicles,
@@ -79,6 +83,7 @@ export function DriverTripsScreen() {
     updateUser,
     addWorkPhoto,
     loading,
+    refetch,
   } = useMockAppStore();
 
   const isSupervisorView = user?.role === 'assistant_supervisor' || user?.role === 'head_supervisor';
@@ -154,12 +159,16 @@ export function DriverTripsScreen() {
   const [, setLocationLoading] = useState(false);
   const [locationPermissionModalVisible, setLocationPermissionModalVisible] = useState(false);
   const [endTripModalVisible, setEndTripModalVisible] = useState(false);
-  const liveLocationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  type GpsPhoto = { uri: string; lat: number; lon: number };
-  const [startPhoto, setStartPhoto] = useState<GpsPhoto | null>(null);
+  /** End photo: camera-only (uri) or with optional lat/lon (EXIF or filled on confirm). */
+  type GpsPhoto = { uri: string; lat?: number; lon?: number };
+  /** Start photo: image only; GPS fetched when user taps Start (no UI block on capture). */
+  const [startPhoto, setStartPhoto] = useState<{ uri: string } | null>(null);
   const [endPhoto, setEndPhoto] = useState<GpsPhoto | null>(null);
+  const [endingInProgress, setEndingInProgress] = useState(false);
   const [takingStartPhoto, setTakingStartPhoto] = useState(false);
   const [takingEndPhoto, setTakingEndPhoto] = useState(false);
+  const startTripInProgressRef = useRef(false);
+  const endTripInProgressRef = useRef(false);
 
   const hasWorkRole = user?.role === 'driver_truck' || user?.role === 'driver_machine' || user?.role === 'assistant_supervisor';
 
@@ -188,7 +197,7 @@ export function DriverTripsScreen() {
       const hasActiveTrip = myTripsNow.some((t) => t.status === 'in_progress');
       if (hasActiveTrip) return; // active trip position is updated by the trip watch effect
       try {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const pos = await getCurrentPositionWithTimeout({});
         if (!mounted) return;
         await updateUser(userId, {
           lastLat: pos.coords.latitude,
@@ -210,110 +219,109 @@ export function DriverTripsScreen() {
     return `${v.vehicleNumberOrId} (${v.type})`;
   };
 
-  // Live location every 30s for survey/supervisor (no watchPositionAsync to avoid LocationEventEmitter.removeSubscription crash)
-  useEffect(() => {
-    if (!activeTrip || isSupervisorView) return;
-    let mounted = true;
-    const tripId = activeTrip.id;
-    const pushPosition = (lat: number, lon: number) => {
-      if (!mounted) return;
-      updateTrip(tripId, {
-        currentLat: lat,
-        currentLon: lon,
-        locationUpdatedAt: new Date().toISOString(),
-      });
-    };
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted' || !mounted) return;
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      if (mounted) pushPosition(pos.coords.latitude, pos.coords.longitude);
-      const interval = setInterval(async () => {
-        if (!mounted) return;
-        try {
-          const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          if (mounted) pushPosition(p.coords.latitude, p.coords.longitude);
-        } catch {
-          // ignore single tick errors
-        }
-      }, LIVE_LOCATION_INTERVAL_MS);
-      liveLocationIntervalRef.current = interval;
-    })();
-    return () => {
-      mounted = false;
-      if (liveLocationIntervalRef.current) {
-        clearInterval(liveLocationIntervalRef.current);
-        liveLocationIntervalRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeTrip identity used inside
-  }, [activeTrip?.id, isSupervisorView, updateTrip]);
-
   const handleStartTrip = async () => {
+    if (startTripInProgressRef.current) return;
     const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
     if (!vehicle || !userId) return;
     const siteId = vehicle.siteId ?? mySiteIds[0];
     if (!siteId) return;
     if (isTruck && !startPhoto) return;
-    setLocationLoading(true);
+    const alreadyActive = myTrips.some((t) => t.status === 'in_progress');
+    if (alreadyActive) {
+      Alert.alert(t('alert_error'), t('driver_one_trip_at_a_time'));
+      return;
+    }
+    startTripInProgressRef.current = true;
     try {
-      let startLat: number;
-      let startLon: number;
-      if (isTruck && startPhoto) {
-        startLat = startPhoto.lat;
-        startLon = startPhoto.lon;
-        const { uri: photoUri } = await validateAndPrepareWorkPhoto(startPhoto.uri);
-        const thumbUri = await generateThumbnail(photoUri);
-        const photoId = generateId('wp');
-        const { photoUrl, thumbnailUrl } = await uploadWorkPhoto(photoId, photoUri, thumbUri);
-        await addWorkPhoto({
-          photoUrl,
-          thumbnailUrl,
-          latitude: startLat,
-          longitude: startLon,
-          siteId,
-          uploadedBy: userId,
-          userRole: user?.role ?? 'driver_truck',
-        });
-      } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          setLocationPermissionModalVisible(true);
-          Alert.alert(t('alert_error'), t('location_required_trip_start'));
-          return;
+      await withLoading(async () => {
+        let startLat: number;
+        let startLon: number;
+        let startPhotoUri: string | undefined;
+        if (isTruck && startPhoto) {
+          // STEP 3: Compress (max 120KB)
+          const { uri: photoUri } = await validateAndPrepareWorkPhoto(startPhoto.uri);
+          // STEP 4: Fetch GPS (required; no cache so we prevent start if GPS fails)
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') {
+            setLocationPermissionModalVisible(true);
+            throw new Error(t('location_required_trip_start'));
+          }
+          const coords = await getCoordsWithTimeout({
+            timeoutMs: 10_000,
+            useCachedFallback: false,
+            accuracy: Location.Accuracy.High,
+          });
+          startLat = coords.lat;
+          startLon = coords.lon;
+          // STEP 5–6: Upload and insert work_photos
+          const thumbUri = await generateThumbnail(photoUri);
+          const photoId = generateId('wp');
+          const { photoUrl, thumbnailUrl } = await uploadWorkPhoto(photoId, photoUri, thumbUri);
+          startPhotoUri = photoUrl;
+          await addWorkPhoto({
+            photoUrl,
+            thumbnailUrl,
+            latitude: startLat,
+            longitude: startLon,
+            siteId,
+            uploadedBy: userId,
+            userRole: user?.role ?? 'driver_truck',
+          });
+        } else {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') {
+            setLocationPermissionModalVisible(true);
+            throw new Error(t('location_required_trip_start'));
+          }
+          const coords = await getCoordsWithTimeout({ timeoutMs: 10_000, useCachedFallback: false });
+          startLat = coords.lat;
+          startLon = coords.lon;
         }
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+        const filled = parseFloat(fuelFilledAtStart);
+        if (!isNaN(filled) && filled > 0) {
+          updateVehicle(selectedVehicleId, { fuelBalanceLitre: vehicle.fuelBalanceLitre + filled });
+        }
+        const startTime = new Date().toISOString();
+        const tripId = generateId('t');
+        // STEP 7: Create trips row with start_time, start_lat, start_lon, photo_uri, status = in_progress
+        await addTrip({
+          id: tripId,
+          vehicleId: selectedVehicleId,
+          driverId: userId,
+          siteId,
+          startTime,
+          distanceKm: 0,
+          loadQuantity: loadQuantity || undefined,
+          fuelFilledAtStart: !isNaN(filled) && filled > 0 ? filled : undefined,
+          status: 'in_progress',
+          startLat,
+          startLon,
+          startPhotoUri: startPhotoUri,
+          createdAt: startTime,
         });
-        startLat = position.coords.latitude;
-        startLon = position.coords.longitude;
-      }
-      const filled = parseFloat(fuelFilledAtStart);
-      if (!isNaN(filled) && filled > 0) {
-        updateVehicle(selectedVehicleId, { fuelBalanceLitre: vehicle.fuelBalanceLitre + filled });
-      }
-      addTrip({
-        id: generateId('t'),
-        vehicleId: selectedVehicleId,
-        driverId: userId,
-        siteId,
-        startTime: new Date().toISOString(),
-        distanceKm: 0,
-        loadQuantity: loadQuantity || undefined,
-        fuelFilledAtStart: !isNaN(filled) && filled > 0 ? filled : undefined,
-        status: 'in_progress',
-        startLat,
-        startLon,
-        createdAt: new Date().toISOString(),
+        // STEP 8: Update assigned_trips status → TRIP_STARTED, started_at
+        const matchingAssigned = assignedTrips.find(
+          (a) => a.driverId === userId && a.vehicleId === selectedVehicleId && (a.status === 'TRIP_ASSIGNED' || a.status === 'TRIP_PENDING')
+        );
+        if (matchingAssigned) {
+          try {
+            await updateAssignedTripStatus(matchingAssigned.id, 'TRIP_STARTED');
+          } catch {
+            // best-effort: trip is created, AS can sync status later
+          }
+        }
+        setStartModalVisible(false);
+        setLoadQuantity('');
+        setFuelFilledAtStart('');
+        setStartPhoto(null);
+        await refetch(true);
       });
-      setStartModalVisible(false);
-      setLoadQuantity('');
-      setFuelFilledAtStart('');
-      setStartPhoto(null);
     } catch (e) {
-      Alert.alert(t('alert_gps_error'), e instanceof Error ? e.message : t('common_gps_position_failed'));
+      const { category, message } = categorizeError(e);
+      const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
+      Alert.alert(t(titleKey), message || t('common_gps_position_failed'));
     } finally {
-      setLocationLoading(false);
+      startTripInProgressRef.current = false;
     }
   };
 
@@ -329,6 +337,29 @@ export function DriverTripsScreen() {
     }
   };
 
+  /** Capture start (speedometer) photo only – no GPS yet; GPS fetched when user taps Start. */
+  const captureStartPhoto = async (): Promise<{ uri: string } | null> => {
+    const cam = await ImagePicker.requestCameraPermissionsAsync();
+    if (cam.status !== 'granted') {
+      Alert.alert(t('alert_error'), t('gps_camera_need_media_permission'));
+      return null;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return null;
+    const asset = result.assets[0];
+    const uri = asset.uri;
+    const mimeType = (asset as { mimeType?: string }).mimeType;
+    if (!isAllowedImageFormat(uri, mimeType)) {
+      Alert.alert(t('alert_error'), t('work_photo_only_images'));
+      return null;
+    }
+    return { uri };
+  };
+
   const captureGpsPhoto = async (): Promise<GpsPhoto | null> => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
@@ -338,11 +369,17 @@ export function DriverTripsScreen() {
     let lat: number;
     let lon: number;
     try {
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      lat = pos.coords.latitude;
-      lon = pos.coords.longitude;
-    } catch {
-      Alert.alert(t('alert_gps_error'), t('common_gps_position_failed'));
+      const coords = await getCoordsWithTimeout({
+        timeoutMs: 10_000,
+        useCachedFallback: true,
+        accuracy: Location.Accuracy.High,
+      });
+      lat = coords.lat;
+      lon = coords.lon;
+    } catch (e) {
+      const { category, message } = categorizeError(e);
+      const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
+      Alert.alert(t(titleKey), message || t('common_gps_position_failed'));
       return null;
     }
     const cam = await ImagePicker.requestCameraPermissionsAsync();
@@ -370,40 +407,72 @@ export function DriverTripsScreen() {
     return { uri, lat: finalLat, lon: finalLon };
   };
 
+  /** Camera-only capture for end trip. No GPS wait — coords resolved when user taps "End with photo". */
+  const captureEndPhoto = async (): Promise<GpsPhoto | null> => {
+    const cam = await ImagePicker.requestCameraPermissionsAsync();
+    if (cam.status !== 'granted') {
+      Alert.alert(t('alert_error'), t('gps_camera_need_media_permission'));
+      return null;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+      exif: true,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return null;
+    const asset = result.assets[0];
+    const uri = asset.uri;
+    const mimeType = (asset as { mimeType?: string }).mimeType;
+    if (!isAllowedImageFormat(uri, mimeType)) {
+      Alert.alert(t('alert_error'), t('work_photo_only_images'));
+      return null;
+    }
+    const exifGps = parseExifGps((asset as { exif?: Record<string, unknown> | null }).exif);
+    return { uri, lat: exifGps?.latitude, lon: exifGps?.longitude };
+  };
+
   const takeStartPhoto = async () => {
     setTakingStartPhoto(true);
-    const photo = await captureGpsPhoto();
+    const photo = await captureStartPhoto();
     setTakingStartPhoto(false);
     if (photo) setStartPhoto(photo);
   };
 
   const takeEndPhoto = async () => {
     setTakingEndPhoto(true);
-    const photo = await captureGpsPhoto();
+    const photo = await captureEndPhoto();
     setTakingEndPhoto(false);
     if (photo) setEndPhoto(photo);
   };
 
   const handleEndTrip = async (photoUri?: string, endLat?: number, endLon?: number) => {
-    if (!activeTrip) return;
+    if (!activeTrip || endTripInProgressRef.current) return;
     const vehicle = vehicles.find((v) => v.id === activeTrip.vehicleId);
     if (!vehicle) return;
+    const inProgressStatuses = ['TRIP_IN_PROGRESS', 'TRIP_STARTED', 'TRIP_RESUMED'];
+    const matchingAssigned = assignedTrips.find(
+      (a) => a.driverId === userId && a.vehicleId === activeTrip.vehicleId && inProgressStatuses.includes(a.status)
+    );
+    if (!canEndTrip(activeTrip, matchingAssigned ?? null, userId)) {
+      Alert.alert(t('error_title_validation'), t('trip_end_failed'));
+      return;
+    }
+    endTripInProgressRef.current = true;
     setLocationLoading(true);
     try {
       let lat = endLat;
       let lon = endLon;
       if (lat == null || lon == null) {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          setLocationPermissionModalVisible(true);
-          Alert.alert(t('alert_error'), t('location_required_trip_end'));
-          return;
-        }
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+        const coords = await getCoordsForTripEnd({
+          startCoords:
+            activeTrip.startLat != null && activeTrip.startLon != null
+              ? { lat: activeTrip.startLat, lon: activeTrip.startLon }
+              : null,
+          timeoutMs: 10_000,
         });
-        lat = position.coords.latitude;
-        lon = position.coords.longitude;
+        lat = coords.lat;
+        lon = coords.lon;
       }
       const endLatVal = lat!;
       const endLonVal = lon!;
@@ -412,7 +481,7 @@ export function DriverTripsScreen() {
       let distanceKm = Math.round(haversineKm(startLat, startLon, endLatVal, endLonVal) * 100) / 100;
       if (distanceKm <= 0) distanceKm = 0.01;
       const endTime = new Date().toISOString();
-      updateTrip(activeTrip.id, {
+      await updateTrip(activeTrip.id, {
         endTime,
         endLat: endLatVal,
         endLon: endLonVal,
@@ -423,10 +492,21 @@ export function DriverTripsScreen() {
         currentLon: undefined,
         locationUpdatedAt: undefined,
       });
+      if (matchingAssigned) {
+        try {
+          await updateAssignedTripStatus(matchingAssigned.id, 'TRIP_NEED_APPROVAL');
+        } catch {
+          // Trip is already completed; approval sync is best-effort
+        }
+      }
+      await refetch(true);
     } catch (e) {
-      Alert.alert(t('alert_gps_error'), e instanceof Error ? e.message : t('common_gps_position_failed'));
+      const { category, message } = categorizeError(e);
+      const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
+      Alert.alert(t(titleKey), message || t('trip_end_failed'));
     } finally {
       setLocationLoading(false);
+      endTripInProgressRef.current = false;
     }
   };
 
@@ -436,37 +516,88 @@ export function DriverTripsScreen() {
   };
 
   const endTripWithGpsPhoto = async () => {
-    if (!endPhoto || !activeTrip) return;
+    if (!endPhoto || !activeTrip || endTripInProgressRef.current || endingInProgress) return;
+    const photoLocalUri = endPhoto.uri;
+    let lat = endPhoto.lat;
+    let lon = endPhoto.lon;
     setEndTripModalVisible(false);
-    setLocationLoading(true);
+    setEndPhoto(null);
+    setEndingInProgress(true);
     try {
+      if (lat == null || lon == null) {
+        const coords = await getCoordsForTripEnd({
+          startCoords:
+            activeTrip.startLat != null && activeTrip.startLon != null
+              ? { lat: activeTrip.startLat, lon: activeTrip.startLon }
+              : null,
+          timeoutMs: 10_000,
+        });
+        lat = coords.lat;
+        lon = coords.lon;
+      }
       const siteId = activeTrip.siteId;
-      const { uri: photoUri } = await validateAndPrepareWorkPhoto(endPhoto.uri);
-      const thumbUri = await generateThumbnail(photoUri);
-      const photoId = generateId('wp');
-      const { photoUrl, thumbnailUrl } = await uploadWorkPhoto(photoId, photoUri, thumbUri);
-      await addWorkPhoto({
-        photoUrl,
-        thumbnailUrl,
-        latitude: endPhoto.lat,
-        longitude: endPhoto.lon,
-        siteId,
-        uploadedBy: userId,
-        userRole: user?.role ?? 'driver_truck',
-      });
-      await handleEndTrip(photoUrl, endPhoto.lat, endPhoto.lon);
+      let photoUrl: string | undefined;
+      try {
+        await withLoading(async () => {
+          const { uri: photoUri } = await validateAndPrepareWorkPhoto(photoLocalUri);
+          const thumbUri = await generateThumbnail(photoUri);
+          const photoId = generateId('wp');
+          const { photoUrl: url, thumbnailUrl } = await uploadWorkPhoto(photoId, photoUri, thumbUri);
+          photoUrl = url;
+          await addWorkPhoto({
+            photoUrl: url,
+            thumbnailUrl,
+            latitude: lat!,
+            longitude: lon!,
+            siteId,
+            uploadedBy: userId,
+            userRole: user?.role ?? 'driver_truck',
+          });
+        });
+      } catch (photoErr) {
+        const errMsg = photoErr instanceof Error ? photoErr.message : String(photoErr);
+        Alert.alert(
+          t('trip_photo_upload_failed_title'),
+          errMsg,
+          [
+            { text: t('general_cancel'), style: 'cancel' },
+            {
+              text: t('trip_photo_upload_failed_end_anyway'),
+              onPress: () => {
+                withLoading(() => handleEndTrip(undefined, lat!, lon!)).catch((e) => {
+                  const { category, message } = categorizeError(e);
+                  Alert.alert(t(ERROR_CATEGORY_TITLE_KEYS[category]), message || t('trip_end_failed'));
+                });
+              },
+            },
+          ]
+        );
+        return;
+      }
+      await withLoading(() => handleEndTrip(photoUrl, lat!, lon!));
     } catch (e) {
-      Alert.alert(t('alert_error'), e instanceof Error ? e.message : t('common_gps_position_failed'));
+      const { category, message } = categorizeError(e);
+      const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
+      Alert.alert(t(titleKey), message || t('trip_end_failed'));
     } finally {
-      setLocationLoading(false);
-      setEndPhoto(null);
+      setEndingInProgress(false);
     }
   };
 
   const endTripWithoutPhoto = async () => {
+    if (endTripInProgressRef.current || endingInProgress) return;
     setEndTripModalVisible(false);
     setEndPhoto(null);
-    await handleEndTrip();
+    setEndingInProgress(true);
+    try {
+      await withLoading(() => handleEndTrip());
+    } catch (e) {
+      const { category, message } = categorizeError(e);
+      const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
+      Alert.alert(t(titleKey), message || t('trip_end_failed'));
+    } finally {
+      setEndingInProgress(false);
+    }
   };
 
   const handleStartSession = () => {
@@ -489,8 +620,12 @@ export function DriverTripsScreen() {
   const handleEndSession = () => {
     if (!activeSession) return;
     const endTime = new Date().toISOString();
+    const startMs = new Date(activeSession.startTime).getTime();
+    const endMs = new Date(endTime).getTime();
+    const durationHours = (endMs - startMs) / (1000 * 60 * 60);
     updateMachineSession(activeSession.id, {
       endTime,
+      durationHours,
       status: 'completed',
     });
     setEndSessionModalVisible(false);
@@ -571,11 +706,6 @@ export function DriverTripsScreen() {
           </View>
         ) : (
           <>
-            {loading && (
-              <View className="py-2 items-center">
-                <ActivityIndicator size="small" color="#2563eb" />
-              </View>
-            )}
         {isSupervisorView && (
           <>
             <View className="mb-4">
@@ -661,21 +791,10 @@ export function DriverTripsScreen() {
                     <View className="flex-row flex-wrap gap-2">
                       {canStart && (
                         <TouchableOpacity
-                          onPress={async () => {
-                            try {
-                              await updateAssignedTripStatus(a.id, nextStatus);
-                              if (isTruck) {
-                                const v = vehicles.find((ve) => ve.id === a.vehicleId);
-                                const siteId = v?.siteId ?? sites[0]?.id;
-                                if (siteId && userId) addTrip({ id: generateId('t'), vehicleId: a.vehicleId, driverId: userId, siteId, startTime: new Date().toISOString(), distanceKm: 0, status: 'in_progress', createdAt: new Date().toISOString() });
-                              } else {
-                                const v = vehicles.find((ve) => ve.id === a.vehicleId);
-                                const siteId = v?.siteId ?? sites[0]?.id;
-                                if (siteId && userId) addMachineSession({ id: generateId('ms'), vehicleId: a.vehicleId, driverId: userId, siteId, startTime: new Date().toISOString(), status: 'in_progress', createdAt: new Date().toISOString() });
-                              }
-                            } catch (e) {
-                              Alert.alert(t('alert_error'), (e as Error).message);
-                            }
+                          onPress={() => {
+                            setSelectedVehicleId(a.vehicleId);
+                            setStartPhoto(null);
+                            setStartModalVisible(true);
                           }}
                           className="bg-green-600 rounded-lg py-2 px-3 flex-row items-center"
                         >
@@ -703,7 +822,11 @@ export function DriverTripsScreen() {
                       )}
                       {canComplete && (
                         <TouchableOpacity
-                          onPress={async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }}
+                          onPress={
+                            isTruck
+                              ? openEndTripModal
+                              : async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }
+                          }
                           className="bg-blue-600 rounded-lg py-2 px-3 flex-row items-center"
                         >
                           <CheckCircle size={16} color="#fff" />
@@ -723,6 +846,14 @@ export function DriverTripsScreen() {
 
         {isTruck ? (
           <>
+            {!isSupervisorView && (activeVehicle || myVehicles[0]) && (
+              <Card className="mb-3 bg-blue-50 border border-blue-100">
+                <Text className="text-sm font-semibold text-gray-700">{t('driver_fuel_balance')}</Text>
+                <Text className="text-lg font-bold text-gray-900 mt-1">
+                  {t('driver_fuel_balance_litres').replace('{value}', String((activeVehicle ?? myVehicles[0])?.fuelBalanceLitre ?? 0))}
+                </Text>
+              </Card>
+            )}
             {!isSupervisorView && !activeTrip ? (
               <TouchableOpacity
                 onPress={() => {
@@ -741,18 +872,38 @@ export function DriverTripsScreen() {
                 <Text className="text-sm text-gray-600">{getVehicleLabel(activeTrip.vehicleId)}</Text>
                 <View className="flex-row gap-2 mt-3">
                   <TouchableOpacity
-                    onPress={() => { setRefuelLitres(''); setRefuelCostPerLitre(''); setRefuelModalVisible(true); }}
+                    onPress={async () => {
+                      const inProgressStatuses = ['TRIP_IN_PROGRESS', 'TRIP_STARTED', 'TRIP_RESUMED'];
+                      const matching = activeTrip ? assignedTrips.find((a) => a.driverId === userId && a.vehicleId === activeTrip.vehicleId && inProgressStatuses.includes(a.status)) : null;
+                      if (matching) {
+                        try {
+                          await withLoading(() => updateAssignedTripStatus(matching.id, 'TRIP_PAUSED'));
+                          setRefuelLitres('');
+                          setRefuelCostPerLitre('');
+                          setRefuelModalVisible(true);
+                          return;
+                        } catch (e) {
+                          Alert.alert(t('alert_error'), e instanceof Error ? e.message : '');
+                          return;
+                        }
+                      }
+                      setRefuelLitres('');
+                      setRefuelCostPerLitre('');
+                      setRefuelModalVisible(true);
+                    }}
                     className="flex-1 bg-gray-600 rounded-lg py-2 flex-row items-center justify-center"
                   >
                     <Fuel size={18} color="#fff" />
-                    <Text className="text-white font-semibold ml-2">{t('driver_mid_shift_refuel')}</Text>
+                    <Text className="text-white font-semibold ml-2">
+                      {activeTrip && assignedTrips.some((a) => a.driverId === userId && a.vehicleId === activeTrip.vehicleId && ['TRIP_IN_PROGRESS', 'TRIP_STARTED', 'TRIP_RESUMED'].includes(a.status)) ? t('driver_pause_and_refuel') : t('driver_mid_shift_refuel')}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={openEndTripModal}
+                    disabled={endingInProgress}
                     className="flex-1 bg-amber-500 rounded-lg py-2 flex-row items-center justify-center"
                   >
-                    <Square size={18} color="#fff" />
-                    <Text className="text-white font-semibold ml-2">{t('trip_end_modal_title')}</Text>
+                    {endingInProgress ? <ActivityIndicator size="small" color="#fff" /> : <><Square size={18} color="#fff" /><Text className="text-white font-semibold ml-2">{t('trip_end_modal_title')}</Text></>}
                   </TouchableOpacity>
                 </View>
               </Card>
@@ -806,9 +957,15 @@ export function DriverTripsScreen() {
             <Text className="text-lg font-bold text-gray-900 mb-2">{t('driver_trip_history')}</Text>
             {myTrips.length === 0 && <Text className="text-gray-500 py-2">{t('driver_no_trips_yet')}</Text>}
             {myTrips.map((trip) => {
-              const start = new Date(trip.startTime).getTime();
-              const end = trip.endTime ? new Date(trip.endTime).getTime() : start;
-              const durationHours = (end - start) / (1000 * 60 * 60);
+              const matchingAssigned = trip.endTime && trip.status === 'completed'
+                ? assignedTrips.find(
+                    (a) => a.vehicleId === trip.vehicleId && a.driverId === trip.driverId && a.status === 'TRIP_COMPLETED' && a.completedAt
+                      && Math.abs(new Date(a.completedAt).getTime() - new Date(trip.endTime!).getTime()) < 10 * 60 * 1000
+                  )
+                : undefined;
+              const durationHours = trip.endTime
+                ? getEffectiveDurationHours(trip.startTime, trip.endTime, matchingAssigned?.pauseSegments)
+                : 0;
               const kmPerHour = trip.status === 'completed' && durationHours > 0 ? trip.distanceKm / durationHours : 0;
               return (
                 <Card key={trip.id} className="mb-2">
@@ -958,7 +1115,8 @@ export function DriverTripsScreen() {
               </View>
               <Text className="text-lg font-bold text-gray-900 text-center">{t('trip_end_modal_title')}</Text>
             </View>
-            <Text className="text-sm text-gray-600 text-center mb-4">{t('trip_end_modal_message')}</Text>
+            <Text className="text-sm text-gray-600 text-center mb-2">{isTruck ? t('trip_end_modal_message_required') : t('trip_end_modal_message')}</Text>
+            {isTruck && <Text className="text-xs text-amber-600 text-center mb-4">{t('trip_end_photo_speedometer_hint')}</Text>}
             {!endPhoto ? (
               <View className="gap-3">
                 <TouchableOpacity
@@ -975,9 +1133,11 @@ export function DriverTripsScreen() {
                     </>
                   )}
                 </TouchableOpacity>
-                <TouchableOpacity onPress={endTripWithoutPhoto} className="py-3 rounded-lg bg-gray-200 items-center">
-                  <Text className="font-semibold text-gray-700">{t('trip_end_without_photo')}</Text>
-                </TouchableOpacity>
+                {!isTruck && (
+                  <TouchableOpacity onPress={endTripWithoutPhoto} className="py-3 rounded-lg bg-gray-200 items-center">
+                    <Text className="font-semibold text-gray-700">{t('trip_end_without_photo')}</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity onPress={() => { setEndTripModalVisible(false); setEndPhoto(null); }} className="py-2 items-center">
                   <Text className="text-sm text-gray-500">{t('common_cancel')}</Text>
                 </TouchableOpacity>
@@ -985,16 +1145,20 @@ export function DriverTripsScreen() {
             ) : (
               <View className="gap-3">
                 <Image source={{ uri: endPhoto.uri }} style={{ width: '100%', height: 140, borderRadius: 12, backgroundColor: '#f3f4f6' }} resizeMode="cover" />
-                <Text className="text-xs text-gray-500">GPS: {endPhoto.lat.toFixed(5)}, {endPhoto.lon.toFixed(5)}</Text>
+                {endPhoto.lat != null && endPhoto.lon != null ? (
+                  <Text className="text-xs text-gray-500">GPS: {endPhoto.lat.toFixed(5)}, {endPhoto.lon.toFixed(5)}</Text>
+                ) : (
+                  <Text className="text-xs text-gray-500">{t('trip_end_gps_recorded_on_confirm')}</Text>
+                )}
                 <View className="flex-row gap-2">
-                  <TouchableOpacity onPress={() => setEndPhoto(null)} className="flex-1 py-2 rounded-lg bg-gray-200 items-center">
+                  <TouchableOpacity onPress={() => setEndPhoto(null)} disabled={endingInProgress} className="flex-1 py-2 rounded-lg bg-gray-200 items-center">
                     <Text className="font-semibold text-gray-700">{t('trip_end_retake')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={endTripWithGpsPhoto} className="flex-1 py-2 rounded-lg bg-amber-500 items-center">
-                    <Text className="font-semibold text-white">{t('trip_end_use_photo')}</Text>
+                  <TouchableOpacity onPress={endTripWithGpsPhoto} disabled={endingInProgress} className="flex-1 py-2 rounded-lg bg-amber-500 items-center">
+                    {endingInProgress ? <ActivityIndicator size="small" color="#fff" /> : <Text className="font-semibold text-white">{t('trip_end_use_photo')}</Text>}
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={() => { setEndTripModalVisible(false); setEndPhoto(null); }} className="py-2 items-center">
+                <TouchableOpacity onPress={() => { setEndTripModalVisible(false); setEndPhoto(null); }} disabled={endingInProgress} className="py-2 items-center">
                   <Text className="text-sm text-gray-500">{t('common_cancel')}</Text>
                 </TouchableOpacity>
               </View>
@@ -1041,12 +1205,13 @@ export function DriverTripsScreen() {
                   )}
                 </TouchableOpacity>
                 <Text className="text-xs text-gray-500 mb-2">{t('trip_start_photo_hint')}</Text>
+                <Text className="text-xs text-amber-600 mb-2">{t('trip_start_photo_speedometer_hint')}</Text>
               </>
             )}
             {isTruck && startPhoto && (
               <View className="mb-4">
                 <Image source={{ uri: startPhoto.uri }} style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#f3f4f6' }} resizeMode="cover" />
-                <Text className="text-xs text-gray-500 mt-2">GPS: {startPhoto.lat.toFixed(5)}, {startPhoto.lon.toFixed(5)}</Text>
+                <Text className="text-xs text-gray-500 mt-2">{t('trip_start_gps_on_confirm')}</Text>
                 <View className="flex-row gap-2 mt-2">
                   <TouchableOpacity onPress={() => setStartPhoto(null)} className="flex-1 py-2 rounded-lg bg-gray-200 items-center">
                     <Text className="font-semibold text-gray-700">{t('trip_retake_photo')}</Text>

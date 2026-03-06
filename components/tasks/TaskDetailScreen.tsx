@@ -123,10 +123,10 @@ export function TaskDetailScreen({ task, onBack }: TaskDetailScreenProps) {
       />
       <ScrollView className="flex-1" contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl }}>
         {/* Task Header */}
-        <Card className="mb-4">
-          <View className="flex-row items-start justify-between mb-3">
+        <Card className="mb-3" style={{ paddingVertical: 12, paddingHorizontal: 14 }}>
+          <View className="flex-row items-start justify-between mb-2">
             <View className="flex-1 mr-2">
-              <Text className="text-xl font-bold text-gray-900 mb-2">{currentTask.title}</Text>
+              <Text className="text-base font-bold text-gray-900 mb-1.5">{currentTask.title}</Text>
               <View className="flex-row gap-2">
                 <Badge variant={priorityVariant[currentTask.priority]} size="sm">
                   {currentTask.priority}
@@ -138,53 +138,53 @@ export function TaskDetailScreen({ task, onBack }: TaskDetailScreenProps) {
             </View>
           </View>
 
-          <Text className="text-base text-gray-700 mb-4">{currentTask.description}</Text>
+          <Text className="text-sm text-gray-700 mb-3">{currentTask.description}</Text>
 
           {/* Task Info */}
-          <View className="space-y-3">
-            <View className="flex-row items-center py-2 border-t border-gray-200">
-              <MapPin size={18} color="#6B7280" />
-              <View className="ml-3 flex-1">
+          <View>
+            <View className="flex-row items-center py-1.5 border-t border-gray-200">
+              <MapPin size={14} color="#6B7280" />
+              <View className="ml-2 flex-1">
                 <Text className="text-xs text-gray-600">{t('task_site_label')}</Text>
-                <Text className="text-sm font-semibold text-gray-900">{currentTask.siteName}</Text>
+                <Text className="text-xs font-semibold text-gray-900">{currentTask.siteName}</Text>
               </View>
             </View>
 
-            <View className="flex-row items-center py-2 border-t border-gray-200">
-              <Calendar size={18} color="#6B7280" />
-              <View className="ml-3 flex-1">
+            <View className="flex-row items-center py-1.5 border-t border-gray-200">
+              <Calendar size={14} color="#6B7280" />
+              <View className="ml-2 flex-1">
                 <Text className="text-xs text-gray-600">{t('task_due_date')}</Text>
-                <Text className="text-sm font-semibold text-gray-900">{currentTask.dueDate}</Text>
+                <Text className="text-xs font-semibold text-gray-900">{currentTask.dueDate}</Text>
               </View>
             </View>
 
-            <View className="flex-row items-center py-2 border-t border-gray-200">
-              <User size={18} color="#6B7280" />
-              <View className="ml-3 flex-1">
+            <View className="flex-row items-center py-1.5 border-t border-gray-200">
+              <User size={14} color="#6B7280" />
+              <View className="ml-2 flex-1">
                 <Text className="text-xs text-gray-600">{t('task_created_label')}</Text>
-                <Text className="text-sm font-semibold text-gray-900">{currentTask.createdAt}</Text>
+                <Text className="text-xs font-semibold text-gray-900">{currentTask.createdAt}</Text>
               </View>
             </View>
           </View>
         </Card>
 
         {/* Progress Card */}
-        <Card className="mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-3">{t('task_progress_label')}</Text>
+        <Card className="mb-3" style={{ paddingVertical: 12, paddingHorizontal: 14 }}>
+          <Text className="text-sm font-bold text-gray-900 mb-2">{t('task_progress_label')}</Text>
           <ProgressBar progress={currentTask.progress} />
 
           {currentTask.status === 'in_progress' && (
-            <View className="mt-4">
-              <Text className="text-sm font-medium text-gray-700 mb-2">{t('task_update_progress')}</Text>
+            <View className="mt-3">
+              <Text className="text-xs font-medium text-gray-700 mb-1.5">{t('task_update_progress')}</Text>
               <TextInput
-                className="border border-gray-300 rounded-lg px-4 py-3 text-base text-gray-900 bg-white mb-3"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white mb-2"
                 placeholder={t('task_progress_placeholder')}
                 value={progress}
                 onChangeText={setProgress}
                 onFocus={() => { if (progress === '0') setProgress(''); }}
                 keyboardType="numeric"
               />
-              <Button onPress={handleUpdateProgress} loading={loading}>
+              <Button onPress={handleUpdateProgress} loading={loading} size="sm">
                 {t('common_save')} {t('task_progress_label')}
               </Button>
             </View>
@@ -193,33 +193,33 @@ export function TaskDetailScreen({ task, onBack }: TaskDetailScreenProps) {
 
         {/* Notes Card */}
         {currentTask.status === 'in_progress' && (
-          <Card className="mb-4">
-            <Text className="text-lg font-bold text-gray-900 mb-3">{t('task_add_notes')}</Text>
+          <Card className="mb-3" style={{ paddingVertical: 12, paddingHorizontal: 14 }}>
+            <Text className="text-sm font-bold text-gray-900 mb-2">{t('task_add_notes')}</Text>
             <TextInput
-              className="border border-gray-300 rounded-lg px-4 py-3 text-base text-gray-900 bg-white mb-3"
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white mb-2"
               placeholder={t('task_notes_placeholder')}
               value={notes}
               onChangeText={setNotes}
               multiline
-              numberOfLines={4}
+              numberOfLines={3}
               textAlignVertical="top"
             />
-            <TouchableOpacity onPress={handleAddPhoto} className="rounded-lg items-center justify-center bg-white border-2 border-blue-600 px-4 py-3 flex-row">
-              <Camera size={18} color="#2563eb" />
-              <Text className="text-blue-600 font-semibold ml-2">{t('task_add_photo')}</Text>
+            <TouchableOpacity onPress={handleAddPhoto} className="rounded-lg items-center justify-center bg-white border-2 border-blue-600 px-3 py-2 flex-row">
+              <Camera size={16} color="#2563eb" />
+              <Text className="text-blue-600 font-semibold ml-2 text-sm">{t('task_add_photo')}</Text>
             </TouchableOpacity>
           </Card>
         )}
 
         {/* Actions */}
-        <Card className="mb-6">
-          <Text className="text-lg font-bold text-gray-900 mb-3">{t('task_actions')}</Text>
+        <Card className="mb-4" style={{ paddingVertical: 12, paddingHorizontal: 14 }}>
+          <Text className="text-sm font-bold text-gray-900 mb-2">{t('task_actions')}</Text>
           
           {currentTask.status === 'pending' && (
-            <Button onPress={handleStartTask} loading={loading} className="mb-3">
+            <Button onPress={handleStartTask} loading={loading} size="sm" className="mb-2">
               <View className="flex-row items-center">
-                <AlertCircle size={18} color="#ffffff" />
-                <Text className="text-white font-semibold ml-2">{t('task_start_task')}</Text>
+                <AlertCircle size={16} color="#ffffff" />
+                <Text className="text-white font-semibold ml-2 text-sm">{t('task_start_task')}</Text>
               </View>
             </Button>
           )}
@@ -229,20 +229,21 @@ export function TaskDetailScreen({ task, onBack }: TaskDetailScreenProps) {
               variant="primary"
               onPress={handleCompleteTask}
               loading={loading}
+              size="sm"
               className="bg-green-600 active:bg-green-700"
             >
               <View className="flex-row items-center">
-                <CheckCircle2 size={18} color="#ffffff" />
-                <Text className="text-white font-semibold ml-2">{t('task_complete_task')}</Text>
+                <CheckCircle2 size={16} color="#ffffff" />
+                <Text className="text-white font-semibold ml-2 text-sm">{t('task_complete_task')}</Text>
               </View>
             </Button>
           )}
 
           {currentTask.status === 'completed' && (
-            <View className="bg-green-50 rounded-lg p-4 items-center">
-              <CheckCircle2 size={32} color="#10B981" />
-              <Text className="text-green-800 font-semibold mt-2">{t('task_completed_title')}</Text>
-              <Text className="text-green-600 text-sm mt-1">
+            <View className="bg-green-50 rounded-lg p-3 items-center">
+              <CheckCircle2 size={24} color="#10B981" />
+              <Text className="text-green-800 font-semibold mt-1.5 text-sm">{t('task_completed_title')}</Text>
+              <Text className="text-green-600 text-xs mt-0.5">
                 {t('task_finished_on')} {currentTask.updatedAt}
               </Text>
             </View>

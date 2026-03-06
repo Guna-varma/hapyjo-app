@@ -9,7 +9,7 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { useLocale } from '@/context/LocaleContext';
-import { TrendingUp, Banknote, PieChart, Plus, FileText, Building2, Users, Globe, BarChart3 } from 'lucide-react-native';
+import { TrendingUp, Banknote, PieChart, Plus, FileText, Building2, Users, Globe, BarChart3, Truck } from 'lucide-react-native';
 import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { colors, layout, form, radius } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
@@ -18,7 +18,7 @@ import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const { t, locale, setLocale } = useLocale();
   const { user } = useAuth();
-  const { sites, surveys, expenses, updateSite } = useMockAppStore();
+  const { sites, surveys, expenses, trips, machineSessions, assignedTrips, vehicles, users, updateSite } = useMockAppStore();
   const ownerName = user?.name?.trim() || 'Owner';
   const [rateModalVisible, setRateModalVisible] = useState(false);
   const [rateSiteId, setRateSiteId] = useState<string | null>(null);
@@ -286,6 +286,33 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
             ))}
           </Card>
         )}
+
+        {/* Fleet & trips – approved by assistant supervisor */}
+        {(() => {
+          const approvedTrips = assignedTrips.filter((a) => a.status === 'TRIP_COMPLETED');
+          const approvedTasks = assignedTrips.filter((a) => a.status === 'TASK_COMPLETED');
+          const completedTripsInRange = trips.filter((tr) => tr.status === 'completed' && inRange(tr.endTime ?? tr.startTime));
+          const completedSessionsInRange = machineSessions.filter((m) => m.status === 'completed' && inRange(m.endTime ?? m.startTime));
+          const totalFuel = completedTripsInRange.reduce((s, tr) => s + (tr.fuelConsumed ?? 0), 0) + completedSessionsInRange.reduce((s, m) => s + (m.fuelConsumed ?? 0), 0);
+          const totalDistance = completedTripsInRange.reduce((s, tr) => s + (tr.distanceKm ?? 0), 0);
+          const totalHours = completedSessionsInRange.reduce((s, m) => s + (m.durationHours ?? 0), 0);
+          const hasFleet = approvedTrips.length > 0 || approvedTasks.length > 0;
+          if (!hasFleet) return null;
+          return (
+            <Card style={[ownerStyles.contractCard, ownerStyles.cardSoft]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Truck size={20} color={colors.primary} style={{ marginRight: 6 }} />
+                <Text style={ownerStyles.contractLabel}>{t('dashboard_fleet_trips_title')}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
+                <Text style={ownerStyles.contractValue}>{t('dashboard_fleet_total_fuel')}: {totalFuel.toFixed(1)} L</Text>
+                <Text style={ownerStyles.contractValue}>{t('dashboard_fleet_total_distance')}: {totalDistance.toFixed(0)} km</Text>
+                <Text style={ownerStyles.contractValue}>{t('dashboard_fleet_total_hours')}: {totalHours.toFixed(1)} h</Text>
+              </View>
+              <Text style={[ownerStyles.contractSiteName, { fontSize: 12, color: colors.textSecondary }]}>{t('dashboard_fleet_approved_by_as')}</Text>
+            </Card>
+          );
+        })()}
 
         {sites.length > 0 ? (
           <>

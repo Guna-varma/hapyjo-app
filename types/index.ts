@@ -183,6 +183,9 @@ export interface Trip {
   status: 'in_progress' | 'completed';
   fuelFilledAtStart?: number;
   fuelConsumed?: number;
+  /** Start trip proof photo URL (speedometer). Set on trip start. */
+  startPhotoUri?: string;
+  /** End trip proof photo URL. Set on trip end (replaces any temporary use of photo_uri at start). */
   photoUri?: string;
   createdAt: string;
 }

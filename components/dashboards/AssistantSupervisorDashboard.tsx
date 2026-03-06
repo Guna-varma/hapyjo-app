@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions, ScrollView } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailScreen } from '@/components/tasks/TaskDetailScreen';
@@ -12,12 +12,12 @@ import { useToast } from '@/context/ToastContext';
 import { formatAmount } from '@/lib/currency';
 import { colors, spacing, radius } from '@/theme/tokens';
 import { getRoleLabelKey } from '@/lib/rbac';
-import type { Task, AssignedTrip, UserRole } from '@/types';
+import type { Task, AssignedTrip, UserRole, Trip } from '@/types';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
-import { Users, Fuel, CheckCircle2, User, Phone, Truck, Pencil, PhoneCall, Percent, Wrench, BarChart3 } from 'lucide-react-native';
+import { Users, Fuel, CheckCircle2, User, Phone, Truck, Pencil, PhoneCall, Percent, Wrench, BarChart3, FileText } from 'lucide-react-native';
 import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { generateId } from '@/lib/id';
-import { getInitialStatusForVehicleType, getCompletedStatus, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
+import { getInitialStatusForVehicleType, getCompletedStatus, getEffectiveDurationHours, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Linking } from 'react-native';
 
@@ -61,7 +61,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const { user } = useAuth();
   const { t } = useLocale();
   const { showToast } = useToast();
-  const { sites, surveys, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, addAssignedTrip, updateAssignedTripStatus, updateUser } = useMockAppStore();
+  const { sites, surveys, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, trips, machineSessions, addAssignedTrip, updateAssignedTripStatus, updateAssignedTrip, updateTrip, updateMachineSession, updateUser } = useMockAppStore();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editPhoneUserId, setEditPhoneUserId] = useState<string | null>(null);
   const [editPhoneValue, setEditPhoneValue] = useState('');
@@ -73,6 +73,12 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const [assignTaskType, setAssignTaskType] = useState('');
   const [assignNotes, setAssignNotes] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
+  const [selectedAssignedForDetail, setSelectedAssignedForDetail] = useState<AssignedTrip | null>(null);
+  const [detailNotes, setDetailNotes] = useState('');
+  const [detailDistance, setDetailDistance] = useState('');
+  const [detailFuel, setDetailFuel] = useState('');
+  const [detailReviseMode, setDetailReviseMode] = useState(false);
+  const [detailSubmitting, setDetailSubmitting] = useState(false);
 
   const siteIds = user?.siteAccess ?? [];
   const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0] ?? null;
@@ -130,11 +136,12 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
 
   const trucksWithDriver = useMemo(() => {
     if (!assignedSite) return [];
-    const siteVehicles = vehicles.filter((v) => normalizeId(v.siteId) === normalizeId(assignedSite.id) && v.type === 'truck');
+    const siteIdNorm = normalizeId(assignedSite.id ?? '');
+    const siteVehicles = vehicles.filter((v) => normalizeId(v.siteId ?? '') === siteIdNorm && v.type === 'truck');
     return siteVehicles
       .map((v) => {
         const assignment = driverVehicleAssignments.find(
-          (a) => normalizeId(a.siteId) === normalizeId(assignedSite.id) && (a.vehicleIds ?? []).includes(v.id)
+          (a) => normalizeId(a.siteId) === siteIdNorm && (a.vehicleIds ?? []).includes(v.id)
         );
         const driverId = assignment?.driverId;
         const driver = driverId ? users.find((u) => normalizeId(u.id) === normalizeId(driverId)) : undefined;
@@ -145,11 +152,12 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
 
   const machinesWithDriver = useMemo(() => {
     if (!assignedSite) return [];
-    const siteVehicles = vehicles.filter((v) => normalizeId(v.siteId) === normalizeId(assignedSite.id) && v.type === 'machine');
+    const siteIdNorm = normalizeId(assignedSite.id ?? '');
+    const siteVehicles = vehicles.filter((v) => normalizeId(v.siteId ?? '') === siteIdNorm && v.type === 'machine');
     return siteVehicles
       .map((v) => {
         const assignment = driverVehicleAssignments.find(
-          (a) => normalizeId(a.siteId) === normalizeId(assignedSite.id) && (a.vehicleIds ?? []).includes(v.id)
+          (a) => normalizeId(a.siteId) === siteIdNorm && (a.vehicleIds ?? []).includes(v.id)
         );
         const driverId = assignment?.driverId;
         const driver = driverId ? users.find((u) => normalizeId(u.id) === normalizeId(driverId)) : undefined;
@@ -448,22 +456,42 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
                           </View>
                         </View>
                         {isNeedApproval && (
-                          <TouchableOpacity
-                            onPress={async () => {
-                              const next = getCompletedStatus(a.status);
-                              if (next) {
-                                try {
-                                  await updateAssignedTripStatus(a.id, next);
-                                  showToast(t('assigned_trip_confirmed'));
-                                } catch (e) {
-                                  Alert.alert(t('alert_error'), (e as Error).message);
+                          <>
+                            <TouchableOpacity
+                              onPress={() => {
+                                setSelectedAssignedForDetail(a);
+                                setDetailNotes(a.notes ?? '');
+                                setDetailReviseMode(false);
+                                const isTruck = a.vehicleType === 'truck';
+                                const ct = trips.filter((t: Trip) => t.vehicleId === a.vehicleId && t.driverId === a.driverId && t.status === 'completed');
+                                const cs = machineSessions.filter((m) => m.vehicleId === a.vehicleId && m.driverId === a.driverId && m.status === 'completed');
+                                const tr = isTruck ? ct.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
+                                const sess = !isTruck ? cs.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
+                                setDetailDistance(tr ? String(tr.distanceKm ?? 0) : '');
+                                setDetailFuel(tr ? String(tr.fuelConsumed ?? 0) : (sess ? String(sess.fuelConsumed ?? 0) : ''));
+                              }}
+                              style={[styles.confirmBtn, { backgroundColor: colors.textSecondary, marginRight: 8 }]}
+                            >
+                              <FileText size={16} color="#fff" style={{ marginRight: 6 }} />
+                              <Text style={styles.confirmBtnText}>{t('assigned_trip_view_details')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={async () => {
+                                const next = getCompletedStatus(a.status);
+                                if (next) {
+                                  try {
+                                    await updateAssignedTripStatus(a.id, next);
+                                    showToast(t('assigned_trip_confirmed'));
+                                  } catch (e) {
+                                    Alert.alert(t('alert_error'), (e as Error).message);
+                                  }
                                 }
-                              }
-                            }}
-                            style={styles.confirmBtn}
-                          >
-                            <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
-                          </TouchableOpacity>
+                              }}
+                              style={styles.confirmBtn}
+                            >
+                              <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
+                            </TouchableOpacity>
+                          </>
                         )}
                       </View>
                     </Card>
@@ -513,22 +541,42 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
                           </View>
                         </View>
                         {isNeedApproval && (
-                          <TouchableOpacity
-                            onPress={async () => {
-                              const next = getCompletedStatus(a.status);
-                              if (next) {
-                                try {
-                                  await updateAssignedTripStatus(a.id, next);
-                                  showToast(t('assigned_trip_confirmed'));
-                                } catch (e) {
-                                  Alert.alert(t('alert_error'), (e as Error).message);
+                          <>
+                            <TouchableOpacity
+                              onPress={() => {
+                                setSelectedAssignedForDetail(a);
+                                setDetailNotes(a.notes ?? '');
+                                setDetailReviseMode(false);
+                                const isTruck = a.vehicleType === 'truck';
+                                const ct = trips.filter((t: Trip) => t.vehicleId === a.vehicleId && t.driverId === a.driverId && t.status === 'completed');
+                                const cs = machineSessions.filter((m) => m.vehicleId === a.vehicleId && m.driverId === a.driverId && m.status === 'completed');
+                                const tr = isTruck ? ct.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
+                                const sess = !isTruck ? cs.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
+                                setDetailDistance(tr ? String(tr.distanceKm ?? 0) : '');
+                                setDetailFuel(tr ? String(tr.fuelConsumed ?? 0) : (sess ? String(sess.fuelConsumed ?? 0) : ''));
+                              }}
+                              style={[styles.confirmBtn, { backgroundColor: colors.textSecondary, marginRight: 8 }]}
+                            >
+                              <FileText size={16} color="#fff" style={{ marginRight: 6 }} />
+                              <Text style={styles.confirmBtnText}>{t('assigned_trip_view_details')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={async () => {
+                                const next = getCompletedStatus(a.status);
+                                if (next) {
+                                  try {
+                                    await updateAssignedTripStatus(a.id, next);
+                                    showToast(t('assigned_trip_confirmed'));
+                                  } catch (e) {
+                                    Alert.alert(t('alert_error'), (e as Error).message);
+                                  }
                                 }
-                              }
-                            }}
-                            style={styles.confirmBtn}
-                          >
-                            <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
-                          </TouchableOpacity>
+                              }}
+                              style={styles.confirmBtn}
+                            >
+                              <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
+                            </TouchableOpacity>
+                          </>
                         )}
                       </View>
                     </Card>
@@ -590,6 +638,137 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
           </Card>
         </View>
       </DashboardLayout>
+
+      <Modal visible={selectedAssignedForDetail != null} transparent animationType="fade">
+        <Pressable style={styles.modalOverlay} onPress={() => { setSelectedAssignedForDetail(null); setDetailReviseMode(false); }}>
+          <Pressable style={[styles.modalBox, { maxHeight: '85%' }]} onPress={(e) => e.stopPropagation()}>
+            <ScrollView style={{ maxHeight: '100%' }} showsVerticalScrollIndicator>
+              {selectedAssignedForDetail && (() => {
+                const a = selectedAssignedForDetail;
+                const vehicle = vehicles.find((v) => v.id === a.vehicleId);
+                const driver = users.find((u) => u.id === a.driverId);
+                const site = sites.find((s) => s.id === a.siteId);
+                const isTruck = a.vehicleType === 'truck';
+                const completedTripsForVehicleDriver = trips.filter((t: Trip) => t.vehicleId === a.vehicleId && t.driverId === a.driverId && t.status === 'completed');
+                const trip = isTruck ? completedTripsForVehicleDriver.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
+                const completedSessionsForVehicleDriver = machineSessions.filter((m) => m.vehicleId === a.vehicleId && m.driverId === a.driverId && m.status === 'completed');
+                const session = !isTruck ? completedSessionsForVehicleDriver.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
+                let durationHours = 0;
+                if (trip) durationHours = getEffectiveDurationHours(trip.startTime, trip.endTime ?? '', a.pauseSegments);
+                else if (session) durationHours = (session.durationHours ?? (session.endTime && session.startTime ? (new Date(session.endTime).getTime() - new Date(session.startTime).getTime()) / (1000 * 60 * 60) : 0));
+                return (
+                  <>
+                    <Text style={styles.modalTitle}>{t('trip_detail_title')}</Text>
+                    <View style={{ marginBottom: spacing.md }}>
+                      <Text style={styles.modalHint}>{t('trip_detail_vehicle')}</Text>
+                      <Text style={styles.sectionTitle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
+                    </View>
+                    <View style={{ marginBottom: spacing.md }}>
+                      <Text style={styles.modalHint}>{t('trip_detail_driver')}</Text>
+                      <Text style={styles.sectionTitle}>{driver?.name ?? a.driverId}</Text>
+                    </View>
+                    <View style={{ marginBottom: spacing.md }}>
+                      <Text style={styles.modalHint}>{t('trip_detail_site')}</Text>
+                      <Text style={styles.sectionTitle}>{site?.name ?? a.siteId}</Text>
+                    </View>
+                    {(trip || session) && (
+                      <>
+                        <View style={{ marginBottom: spacing.md }}>
+                          <Text style={styles.modalHint}>{t('trip_detail_start_time')}</Text>
+                          <Text style={styles.sectionTitle}>{(trip?.startTime ?? session?.startTime) ? new Date((trip?.startTime ?? session?.startTime) ?? '').toLocaleString() : '—'}</Text>
+                        </View>
+                        <View style={{ marginBottom: spacing.md }}>
+                          <Text style={styles.modalHint}>{t('trip_detail_end_time')}</Text>
+                          <Text style={styles.sectionTitle}>{(trip?.endTime ?? session?.endTime) ? new Date((trip?.endTime ?? session?.endTime) ?? '').toLocaleString() : '—'}</Text>
+                        </View>
+                        <View style={{ marginBottom: spacing.md }}>
+                          <Text style={styles.modalHint}>{t('trip_detail_duration')}</Text>
+                          <Text style={styles.sectionTitle}>{durationHours > 0 ? `${durationHours.toFixed(1)} h` : '—'}</Text>
+                        </View>
+                        {trip && (
+                          <>
+                            <View style={{ marginBottom: spacing.md }}>
+                              <Text style={styles.modalHint}>{t('trip_detail_distance')}</Text>
+                              {detailReviseMode ? (
+                                <TextInput style={styles.phoneInput} value={detailDistance} onChangeText={setDetailDistance} placeholder="km" keyboardType="decimal-pad" />
+                              ) : (
+                                <Text style={styles.sectionTitle}>{trip.distanceKm ?? 0} km</Text>
+                              )}
+                            </View>
+                            {trip.photoUri ? <Text style={[styles.modalHint, { marginBottom: 4 }]}>{t('driver_photo_attached')}</Text> : null}
+                          </>
+                        )}
+                        <View style={{ marginBottom: spacing.md }}>
+                          <Text style={styles.modalHint}>{t('trip_detail_fuel')}</Text>
+                          {detailReviseMode ? (
+                            <TextInput style={styles.phoneInput} value={detailFuel} onChangeText={setDetailFuel} placeholder="L" keyboardType="decimal-pad" />
+                          ) : (
+                            <Text style={styles.sectionTitle}>{(trip?.fuelConsumed ?? session?.fuelConsumed ?? 0).toFixed(1)} L</Text>
+                          )}
+                        </View>
+                      </>
+                    )}
+                    <View style={{ marginBottom: spacing.md }}>
+                      <Text style={styles.modalHint}>{t('trip_detail_notes')}</Text>
+                      <TextInput
+                        style={[styles.phoneInput, { minHeight: 64 }]}
+                        value={detailNotes}
+                        onChangeText={setDetailNotes}
+                        placeholder={t('trip_detail_notes')}
+                        placeholderTextColor={colors.textMuted}
+                        editable={detailReviseMode}
+                        multiline
+                      />
+                    </View>
+                    <View style={styles.modalActions}>
+                      <Pressable onPress={() => setSelectedAssignedForDetail(null)} style={styles.modalCancel}>
+                        <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
+                      </Pressable>
+                      <TouchableOpacity onPress={() => setDetailReviseMode(!detailReviseMode)} style={[styles.modalCancel, { marginRight: 8 }]}>
+                        <Text style={styles.modalCancelText}>{t('trip_detail_revise')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={async () => {
+                          if (!selectedAssignedForDetail) return;
+                          const a = selectedAssignedForDetail;
+                          setDetailSubmitting(true);
+                          try {
+                            if (trip) {
+                              const dist = parseFloat(detailDistance);
+                              if (!Number.isNaN(dist) && dist >= 0) await updateTrip(trip.id, { distanceKm: dist });
+                              const fuel = parseFloat(detailFuel);
+                              if (!Number.isNaN(fuel) && fuel >= 0) await updateTrip(trip.id, { fuelConsumed: fuel });
+                            } else if (session) {
+                              const fuel = parseFloat(detailFuel);
+                              if (!Number.isNaN(fuel) && fuel >= 0) await updateMachineSession(session.id, { fuelConsumed: fuel });
+                            }
+                            if (detailNotes !== (a.notes ?? '')) await updateAssignedTrip(a.id, { notes: detailNotes });
+                            const next = getCompletedStatus(a.status);
+                            if (next) {
+                              await updateAssignedTripStatus(a.id, next);
+                              showToast(t('assigned_trip_confirmed'));
+                            }
+                            setSelectedAssignedForDetail(null);
+                            setDetailReviseMode(false);
+                          } catch (e) {
+                            Alert.alert(t('alert_error'), (e as Error).message);
+                          } finally {
+                            setDetailSubmitting(false);
+                          }
+                        }}
+                        disabled={detailSubmitting}
+                        style={[styles.modalSave, { opacity: detailSubmitting ? 0.7 : 1 }]}
+                      >
+                        <Text style={styles.modalSaveText}>{detailSubmitting ? '…' : t('trip_detail_submit')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                );
+              })()}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={editPhoneUserId != null} transparent animationType="fade">
         <Pressable style={styles.modalOverlay} onPress={() => setEditPhoneUserId(null)}>
@@ -734,6 +913,7 @@ const styles = StyleSheet.create({
   },
   assignedRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,

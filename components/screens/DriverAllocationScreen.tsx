@@ -44,7 +44,7 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
     return siteAssignments
       .filter((a) => a.siteId === siteId && assignableRole(a.role))
       .map((a) => users.find((u) => u.id === a.userId))
-      .filter((u): u is NonNullable<typeof u> => Boolean(u) && assignableRole(u.role));
+      .filter((u): u is NonNullable<typeof u> => u != null && assignableRole(u.role));
   }, [siteId, siteAssignments, users]);
 
   const getAssignedVehicleIds = useCallback(

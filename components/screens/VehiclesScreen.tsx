@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, RefreshControl, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, RefreshControl, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
   Header,
@@ -55,6 +55,9 @@ export function VehiclesScreen() {
     vehicles,
     driverVehicleAssignments,
     users,
+    trips,
+    machineSessions,
+    assignedTrips,
     updateVehicle,
     refetch,
     syncFromWebsiteVehicles,
@@ -82,6 +85,8 @@ export function VehiclesScreen() {
   const [idealConsumptionRange, setIdealConsumptionRange] = useState('');
   const [idealWorkingRange, setIdealWorkingRange] = useState('');
   const [editStatus, setEditStatus] = useState<VehicleStatus>('active');
+  const [selectedVehicleForDetail, setSelectedVehicleForDetail] = useState<VehicleType | null>(null);
+  const [selectedTripDetail, setSelectedTripDetail] = useState<{ trip: import('@/types').Trip } | { session: import('@/types').MachineSession } | null>(null);
 
   /** Canonical id for comparison (DB/assignments may return with whitespace or different casing). */
   const normalizeVehicleId = (id: string) => String(id ?? '').trim();
@@ -376,7 +381,7 @@ export function VehiclesScreen() {
                   return (
                     <Pressable
                       key={v.id}
-                      onPress={() => openEdit(v)}
+                      onPress={() => setSelectedVehicleForDetail(v)}
                       style={styles.vehicleCardPressable}
                       accessibilityRole="button"
                       accessibilityLabel={`${v.vehicleNumberOrId}, ${v.type}`}
@@ -477,6 +482,177 @@ export function VehiclesScreen() {
           </>
         )}
       </ScreenContainer>
+
+      <Modal visible={!!selectedVehicleForDetail} transparent animationType="fade">
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedVehicleForDetail(null)}>
+          <View style={{ flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+            <Pressable onPress={(e) => e.stopPropagation()} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, maxHeight: '85%' }}>
+              <ScrollView showsVerticalScrollIndicator style={{ maxHeight: 400 }}>
+                {selectedVehicleForDetail && (() => {
+                  const v = selectedVehicleForDetail;
+                  const siteName = getSiteName(v.siteId ?? FREE_SITE_KEY);
+                  const vehicleTrips = trips.filter((t) => t.vehicleId === v.id && t.status === 'completed');
+                  const vehicleSessions = machineSessions.filter((m) => m.vehicleId === v.id && m.status === 'completed');
+                  const allocated = v.siteId ? isAllocated(v.siteId, v.id) : false;
+                  const contactKey = v.siteId ? `${v.siteId}|${normalizeVehicleId(v.id)}` : '';
+                  const contact = contactKey ? contactBySiteAndVehicleId[contactKey] : null;
+                  return (
+                    <>
+                      <View style={styles.vehicleCardHeader}>
+                        <Text style={[styles.vehicleCardTitle, { marginBottom: 4 }]}>{v.vehicleNumberOrId}</Text>
+                        <View style={styles.vehicleCardTypePill}>
+                          <Text style={styles.vehicleCardTypeText}>{v.type === 'truck' ? t('vehicles_trucks') : t('vehicles_machines')}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('vehicles_site_label')}</Text>
+                      <Text style={styles.specValue}>{siteName}</Text>
+                      <View style={styles.vehicleCardSpecs}>
+                        <View style={styles.specRow}>
+                          <Text style={styles.specLabel}>{t('vehicles_card_tank')}</Text>
+                          <Text style={styles.specValue}>{v.tankCapacityLitre} L</Text>
+                        </View>
+                        <View style={styles.specRow}>
+                          <Text style={styles.specLabel}>{t('vehicles_card_fuel')}</Text>
+                          <Text style={styles.specValue}>{v.fuelBalanceLitre} L</Text>
+                        </View>
+                        {v.type === 'truck' && v.mileageKmPerLitre != null && (
+                          <View style={styles.specRow}>
+                            <Text style={styles.specLabel}>{t('vehicles_card_mileage')}</Text>
+                            <Text style={styles.specValue}>{Number(v.mileageKmPerLitre).toFixed(1)} km/L</Text>
+                          </View>
+                        )}
+                      </View>
+                      {allocated && contact && (
+                        <View style={[styles.allocatedRow, { marginVertical: 8 }]}>
+                          <Text style={styles.allocatedLabel}>{t('vehicles_allocated_to')}:</Text>
+                          <Text style={styles.allocatedValue}>{contact.name}{contact.phone ? ` · ${contact.phone}` : ''}</Text>
+                        </View>
+                      )}
+                      <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 8 }]}>{t('vehicle_detail_trips_section')}</Text>
+                      {vehicleTrips.length === 0 && vehicleSessions.length === 0 ? (
+                        <Text style={[styles.footerText, { marginBottom: 8 }]}>{t('general_none')}</Text>
+                      ) : (
+                        <>
+                          {vehicleTrips.slice(0, 10).map((trip) => {
+                            const driver = users.find((u) => u.id === trip.driverId);
+                            const approved = assignedTrips.some((a) => a.vehicleId === v.id && a.driverId === trip.driverId && a.status === 'TRIP_COMPLETED');
+                            return (
+                              <TouchableOpacity key={trip.id} onPress={() => setSelectedTripDetail({ trip })} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                <Text style={styles.specValue}>{driver?.name ?? trip.driverId} · {trip.startTime?.slice(0, 10)}</Text>
+                                <Text style={styles.specLabel}>{trip.distanceKm} km · {(trip.fuelConsumed ?? 0).toFixed(1)} L {approved ? `· ${t('vehicle_detail_approved')}` : ''}</Text>
+                                <Text style={[styles.specLabel, { fontSize: 11, color: colors.primary, marginTop: 2 }]}>{t('assigned_trip_view_details')}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                          {vehicleSessions.slice(0, 10).map((sess) => {
+                            const driver = users.find((u) => u.id === sess.driverId);
+                            const approved = assignedTrips.some((a) => a.vehicleId === v.id && a.driverId === sess.driverId && a.status === 'TASK_COMPLETED');
+                            return (
+                              <TouchableOpacity key={sess.id} onPress={() => setSelectedTripDetail({ session: sess })} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                <Text style={styles.specValue}>{driver?.name ?? sess.driverId} · {sess.startTime?.slice(0, 10)}</Text>
+                                <Text style={styles.specLabel}>{(sess.durationHours ?? 0).toFixed(1)} h · {(sess.fuelConsumed ?? 0).toFixed(1)} L {approved ? `· ${t('vehicle_detail_approved')}` : ''}</Text>
+                                <Text style={[styles.specLabel, { fontSize: 11, color: colors.primary, marginTop: 2 }]}>{t('assigned_trip_view_details')}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </>
+                      )}
+                      <View style={{ flexDirection: 'row', marginTop: 16, gap: 12 }}>
+                        <TouchableOpacity onPress={() => setSelectedVehicleForDetail(null)} style={{ flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.border, borderRadius: radius.md }}>
+                          <Text style={{ fontWeight: '600', color: colors.text }}>{t('common_cancel')}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (selectedVehicleForDetail) openEdit(selectedVehicleForDetail);
+                            setSelectedVehicleForDetail(null);
+                          }}
+                          style={{ flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.primary, borderRadius: radius.md }}
+                        >
+                          <Text style={{ fontWeight: '600', color: colors.surface }}>{t('vehicles_edit')}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  );
+                })()}
+              </ScrollView>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!selectedTripDetail} transparent animationType="fade">
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedTripDetail(null)}>
+          <View style={{ flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+            <Pressable onPress={(e) => e.stopPropagation()} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, maxHeight: '80%' }}>
+              <ScrollView showsVerticalScrollIndicator>
+                {selectedTripDetail && ('trip' in selectedTripDetail ? (
+                  (() => {
+                    const trip = selectedTripDetail.trip;
+                    const driver = users.find((u) => u.id === trip.driverId);
+                    const vehicle = selectedVehicleForDetail ?? vehicles.find((ve) => ve.id === trip.vehicleId);
+                    const approved = assignedTrips.some((a) => a.vehicleId === trip.vehicleId && a.driverId === trip.driverId && a.status === 'TRIP_COMPLETED');
+                    const start = new Date(trip.startTime).getTime();
+                    const end = trip.endTime ? new Date(trip.endTime).getTime() : start;
+                    const durationH = (end - start) / (1000 * 60 * 60);
+                    return (
+                      <>
+                        <Text style={[styles.vehicleCardTitle, { marginBottom: 8 }]}>{t('trip_detail_title')}</Text>
+                        <Text style={styles.specLabel}>{t('trip_detail_vehicle')}</Text>
+                        <Text style={styles.specValue}>{vehicle?.vehicleNumberOrId ?? trip.vehicleId}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_driver')}</Text>
+                        <Text style={styles.specValue}>{driver?.name ?? trip.driverId}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_start_time')}</Text>
+                        <Text style={styles.specValue}>{trip.startTime ? new Date(trip.startTime).toLocaleString() : '—'}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_end_time')}</Text>
+                        <Text style={styles.specValue}>{trip.endTime ? new Date(trip.endTime).toLocaleString() : '—'}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_duration')}</Text>
+                        <Text style={styles.specValue}>{durationH > 0 ? `${durationH.toFixed(1)} h` : '—'}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_distance')}</Text>
+                        <Text style={styles.specValue}>{trip.distanceKm ?? 0} km</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_fuel')}</Text>
+                        <Text style={styles.specValue}>{(trip.fuelConsumed ?? 0).toFixed(1)} L</Text>
+                        {trip.photoUri ? <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('driver_photo_attached')}</Text> : null}
+                        {approved ? <Text style={[styles.specLabel, { marginTop: 8, color: colors.primary }]}>{t('vehicle_detail_approved')}</Text> : null}
+                        <TouchableOpacity onPress={() => setSelectedTripDetail(null)} style={{ marginTop: 16, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.border, borderRadius: radius.md }}>
+                          <Text style={{ fontWeight: '600', color: colors.text }}>{t('common_cancel')}</Text>
+                        </TouchableOpacity>
+                      </>
+                    );
+                  })()
+                ) : (
+                  (() => {
+                    const session = selectedTripDetail.session;
+                    const driver = users.find((u) => u.id === session.driverId);
+                    const vehicle = selectedVehicleForDetail ?? vehicles.find((ve) => ve.id === session.vehicleId);
+                    const approved = assignedTrips.some((a) => a.vehicleId === session.vehicleId && a.driverId === session.driverId && a.status === 'TASK_COMPLETED');
+                    return (
+                      <>
+                        <Text style={[styles.vehicleCardTitle, { marginBottom: 8 }]}>{t('trip_detail_title')}</Text>
+                        <Text style={styles.specLabel}>{t('trip_detail_vehicle')}</Text>
+                        <Text style={styles.specValue}>{vehicle?.vehicleNumberOrId ?? session.vehicleId}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_driver')}</Text>
+                        <Text style={styles.specValue}>{driver?.name ?? session.driverId}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_start_time')}</Text>
+                        <Text style={styles.specValue}>{session.startTime ? new Date(session.startTime).toLocaleString() : '—'}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_end_time')}</Text>
+                        <Text style={styles.specValue}>{session.endTime ? new Date(session.endTime).toLocaleString() : '—'}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_duration')}</Text>
+                        <Text style={styles.specValue}>{(session.durationHours ?? 0) > 0 ? `${(session.durationHours ?? 0).toFixed(1)} h` : '—'}</Text>
+                        <Text style={[styles.specLabel, { marginTop: 8 }]}>{t('trip_detail_fuel')}</Text>
+                        <Text style={styles.specValue}>{(session.fuelConsumed ?? 0).toFixed(1)} L</Text>
+                        {approved ? <Text style={[styles.specLabel, { marginTop: 8, color: colors.primary }]}>{t('vehicle_detail_approved')}</Text> : null}
+                        <TouchableOpacity onPress={() => setSelectedTripDetail(null)} style={{ marginTop: 16, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.border, borderRadius: radius.md }}>
+                          <Text style={{ fontWeight: '600', color: colors.text }}>{t('common_cancel')}</Text>
+                        </TouchableOpacity>
+                      </>
+                    );
+                  })()
+                ))}
+              </ScrollView>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       <FormModal
         visible={!!editVehicle}

@@ -216,10 +216,10 @@ export function DriverDashboard(_props: DashboardNavProps = {}) {
       >
         <View style={styles.statsRow}>
           {stats.map((stat, index) => (
-            <Card key={index} className={`flex-1 ${stat.bg}`}>
-              <View className="items-center py-2">
+            <Card key={index} className={`flex-1 ${stat.bg}`} style={{ paddingVertical: 8, paddingHorizontal: 8 }}>
+              <View className="items-center">
                 {stat.icon}
-                <Text className="text-xl font-bold text-gray-900 mt-1">{stat.value}</Text>
+                <Text className="text-lg font-bold text-gray-900 mt-0.5">{stat.value}</Text>
                 <Text className="text-xs text-gray-600">{stat.label}</Text>
               </View>
             </Card>
@@ -232,7 +232,7 @@ export function DriverDashboard(_props: DashboardNavProps = {}) {
             listForSection.map((a) => (
               <Card key={a.id} style={styles.assignedItemCard}>
                 <View style={styles.assignedItemRow}>
-                  <Truck size={18} color={colors.primary} style={{ marginRight: 8 }} />
+                  <Truck size={16} color={colors.primary} style={{ marginRight: 6 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.assignedItemVehicle}>{getVehicleLabel(a.vehicleId)}</Text>
                     <Text style={styles.assignedItemMeta}>{getSiteName(a.siteId)}{a.taskType ? ` • ${a.taskType}` : ''}</Text>
@@ -376,38 +376,38 @@ const styles = StyleSheet.create({
     marginBottom: layout.cardSpacingVertical,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   assignedItemCard: {
-    marginBottom: 10,
-    padding: 12,
+    marginBottom: 8,
+    padding: 10,
   },
   assignedItemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
   assignedItemVehicle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: colors.text,
   },
   assignedItemMeta: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textSecondary,
     marginTop: 2,
   },
   assignedItemBadge: {
     alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
     borderRadius: 6,
-    marginTop: 6,
+    marginTop: 4,
   },
   assignedItemBadgeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
 });
