@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { Badge } from '@/components/ui/Badge';
@@ -7,63 +7,26 @@ import { DashboardLayout } from '@/components/ui/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
-import { useToast } from '@/context/ToastContext';
-import { MapPin, Calendar, Plus, ImagePlus } from 'lucide-react-native';
+import { MapPin, Calendar, Plus } from 'lucide-react-native';
 import { colors, layout } from '@/theme/tokens';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
-import { uploadToSupabase } from '@/features/gpsCamera/uploadToSupabase';
 
 export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { user } = useAuth();
   const { t } = useLocale();
-  const { showToast } = useToast();
-  const { surveys, updateSurvey } = useMockAppStore();
+  const { surveys, sites } = useMockAppStore();
   const mySurveys = surveys.filter((survey) => survey.surveyorId === user?.id);
-  const [uploadingSurveyId, setUploadingSurveyId] = useState<string | null>(null);
-
-  const addPhotosToSurvey = useCallback(
-    async (surveyId: string) => {
-      const survey = mySurveys.find((s) => s.id === surveyId);
-      if (!survey) return;
-      setUploadingSurveyId(surveyId);
-      try {
-        const { launchImageLibraryAsync } = await import('expo-image-picker');
-        const result = await launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          allowsMultipleSelection: true,
-          quality: 0.8,
-        });
-        if (result.canceled || !result.assets?.length) {
-          setUploadingSurveyId(null);
-          return;
-        }
-        const existing = survey.photos ?? [];
-        const urls: string[] = [];
-        for (const asset of result.assets) {
-          const uri = asset.uri;
-          if (uri) {
-            const url = await uploadToSupabase(uri);
-            urls.push(url);
-          }
-        }
-        if (urls.length > 0) {
-          await updateSurvey(surveyId, { photos: [...existing, ...urls] });
-          showToast(t('surveys_photos_added'));
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Upload failed';
-        Alert.alert('Error', msg);
-      } finally {
-        setUploadingSurveyId(null);
-      }
-    },
-    [mySurveys, updateSurvey, showToast, t]
-  );
+  const getSiteName = (siteId: string) => sites.find((s) => s.id === siteId)?.name ?? siteId;
 
   const statusVariant = {
-    draft: 'default' as const,
-    submitted: 'warning' as const,
+    approval_pending: 'warning' as const,
     approved: 'success' as const,
+    rejected: 'danger' as const,
+  };
+  const statusLabelKey: Record<string, string> = {
+    approval_pending: 'surveys_status_pending',
+    approved: 'surveys_status_approved',
+    rejected: 'surveys_status_rejected',
   };
 
   return (
@@ -81,20 +44,12 @@ export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
       <DashboardLayout>
         {/* Quick Stats */}
         <View className="flex-row mb-4 gap-3">
-          <Card className="flex-1 bg-blue-50">
-            <View className="items-center py-3">
-              <Text className="text-2xl font-bold text-gray-900">
-                {mySurveys.filter((s) => s.status === 'draft').length}
-              </Text>
-              <Text className="text-xs text-gray-600 mt-1">{t('dashboard_drafts')}</Text>
-            </View>
-          </Card>
           <Card className="flex-1 bg-yellow-50">
             <View className="items-center py-3">
               <Text className="text-2xl font-bold text-gray-900">
-                {mySurveys.filter((s) => s.status === 'submitted').length}
+                {mySurveys.filter((s) => s.status === 'approval_pending').length}
               </Text>
-              <Text className="text-xs text-gray-600 mt-1">{t('dashboard_submitted')}</Text>
+              <Text className="text-xs text-gray-600 mt-1">{t('surveys_status_pending')}</Text>
             </View>
           </Card>
           <Card className="flex-1 bg-green-50">
@@ -105,69 +60,52 @@ export function SurveyorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
               <Text className="text-xs text-gray-600 mt-1">{t('surveys_approved_list')}</Text>
             </View>
           </Card>
+          <Card className="flex-1 bg-red-50">
+            <View className="items-center py-3">
+              <Text className="text-2xl font-bold text-gray-900">
+                {mySurveys.filter((s) => s.status === 'rejected').length}
+              </Text>
+              <Text className="text-xs text-gray-600 mt-1">{t('surveys_status_rejected')}</Text>
+            </View>
+          </Card>
         </View>
 
-        {/* Recent Surveys */}
+        {/* My Surveys */}
         <View className="mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-3">{t('surveys_approved_list')}</Text>
+          <Text className="text-lg font-bold text-gray-900 mb-3">{t('surveys_my_surveys')}</Text>
+          {mySurveys.length === 0 && (
+            <Text className="text-gray-500 py-4">{t('surveys_empty_surveyor')}</Text>
+          )}
           {mySurveys.map((survey) => (
             <Card key={survey.id} className="mb-3">
               <View className="flex-row items-start justify-between mb-2">
-                <Text className="text-base font-bold text-gray-900 flex-1">{survey.type}</Text>
+                <Text className="text-base font-bold text-gray-900 flex-1">{getSiteName(survey.siteId)}</Text>
                 <Badge variant={statusVariant[survey.status]} size="sm">
-                  {survey.status}
+                  {t(statusLabelKey[survey.status] ?? 'surveys_status_pending')}
                 </Badge>
               </View>
-
               <View className="flex-row items-center mb-2">
                 <MapPin size={14} color="#6B7280" />
-                <Text className="text-sm text-gray-600 ml-1">{survey.siteName}</Text>
+                <Text className="text-sm text-gray-600 ml-1">{getSiteName(survey.siteId)}</Text>
               </View>
-
-              <View className="flex-row items-center mb-3">
+              <View className="flex-row items-center mb-2">
                 <Calendar size={14} color="#6B7280" />
-                <Text className="text-sm text-gray-600 ml-1">{survey.createdAt}</Text>
+                <Text className="text-sm text-gray-600 ml-1">{survey.surveyDate}</Text>
               </View>
-
-              {survey.workVolume != null && (
-                <View className="bg-blue-50 rounded-lg p-2 mb-2">
-                  <Text className="text-sm font-semibold text-gray-900">
-                    {(survey.workVolume ?? 0).toFixed(2)} m³
-                  </Text>
-                  <Text className="text-xs text-gray-600">{t('surveys_work_volume')}</Text>
-                </View>
-              )}
-
-              {survey.location && (
-                <View className="bg-gray-50 rounded p-2 mb-3">
-                  <Text className="text-xs text-gray-600">
-                    GPS: {survey.location.latitude.toFixed(4)}, {survey.location.longitude.toFixed(4)}
-                  </Text>
-                </View>
-              )}
-
-              <View className="flex-row justify-between items-center pt-3 border-t border-gray-200">
+              <View className="bg-blue-50 rounded-lg p-2 mb-2">
+                <Text className="text-sm font-semibold text-gray-900">
+                  {survey.volumeM3.toFixed(2)} m³
+                </Text>
+                <Text className="text-xs text-gray-600">{t('surveys_work_volume')}</Text>
+              </View>
+              {survey.status === 'rejected' && (
                 <TouchableOpacity
-                  onPress={() => addPhotosToSurvey(survey.id)}
-                  disabled={uploadingSurveyId === survey.id}
-                  className="flex-row items-center"
+                  onPress={() => onNavigateTab?.('surveys', { openReviseSurveyId: survey.id })}
+                  className="mt-2 py-2 flex-row items-center justify-center rounded-lg border border-blue-600"
                 >
-                  {uploadingSurveyId === survey.id ? (
-                    <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 6 }} />
-                  ) : (
-                    <ImagePlus size={16} color="#2563eb" />
-                  )}
-                  <Text className="text-xs text-gray-600 ml-1">
-                    {survey.photos?.length || 0} {t('common_photos')}
-                  </Text>
-                  <Text className="text-xs text-blue-600 font-medium ml-2">{t('surveys_add_photos')}</Text>
+                  <Text className="text-blue-600 font-semibold">{t('surveys_revise')}</Text>
                 </TouchableOpacity>
-                {survey.status === 'draft' && (
-                  <TouchableOpacity onPress={() => onNavigateTab?.('surveys')}>
-                    <Text className="text-sm text-blue-600 font-semibold">{t('common_continue')}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              )}
             </Card>
           ))}
         </View>

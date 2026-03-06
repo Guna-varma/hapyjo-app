@@ -70,6 +70,7 @@ export function siteFromRow(row: Record<string, unknown>): Site {
     driverIds: toStringArray(row.driver_ids),
     vehicleIds: toStringArray(row.vehicle_ids),
     contractRateRwf: row.contract_rate_rwf != null ? Number(row.contract_rate_rwf) : undefined,
+    totalExcavatedM3: row.total_excavated_m3 != null ? Number(row.total_excavated_m3) : undefined,
   };
 }
 
@@ -149,22 +150,19 @@ export function machineSessionFromRow(row: Record<string, unknown>): MachineSess
 }
 
 export function surveyFromRow(row: Record<string, unknown>): Survey {
+  const surveyDate = row.survey_date != null ? String(row.survey_date) : '';
   return {
     id: String(row.id),
-    type: String(row.type),
     siteId: String(row.site_id),
-    siteName: row.site_name != null ? String(row.site_name) : '',
+    surveyDate: surveyDate.slice(0, 10),
+    volumeM3: row.volume_m3 != null ? Number(row.volume_m3) : 0,
+    status: (row.status as Survey['status']) ?? 'approval_pending',
     surveyorId: String(row.surveyor_id),
-    measurements: (row.measurements as Record<string, unknown>) ?? {},
-    location: row.location as Survey['location'],
-    photos: (row.photos as string[]) ?? [],
-    status: row.status as Survey['status'],
     createdAt: row.created_at != null ? String(row.created_at) : '',
-    beforeFileContent: row.before_file_content != null ? String(row.before_file_content) : undefined,
-    afterFileContent: row.after_file_content != null ? String(row.after_file_content) : undefined,
-    workVolume: row.work_volume != null ? Number(row.work_volume) : undefined,
     approvedById: row.approved_by_id != null ? String(row.approved_by_id) : undefined,
     approvedAt: row.approved_at != null ? String(row.approved_at) : undefined,
+    revisionOf: row.revision_of != null ? String(row.revision_of) : undefined,
+    notes: row.notes != null ? String(row.notes) : undefined,
   };
 }
 
@@ -488,19 +486,15 @@ export function machineSessionToRow(m: Partial<MachineSession>): Record<string, 
 export function surveyToRow(s: Partial<Survey>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (s.id != null) row.id = s.id;
-  if (s.type != null) row.type = s.type;
   if (s.siteId != null) row.site_id = s.siteId;
-  if (s.siteName !== undefined) row.site_name = s.siteName;
-  if (s.surveyorId != null) row.surveyor_id = s.surveyorId;
-  if (s.measurements != null) row.measurements = s.measurements;
-  if (s.location !== undefined) row.location = s.location;
-  if (s.photos != null) row.photos = s.photos;
+  if (s.surveyDate != null) row.survey_date = s.surveyDate;
+  if (s.volumeM3 !== undefined) row.volume_m3 = s.volumeM3;
   if (s.status != null) row.status = s.status;
-  if (s.beforeFileContent !== undefined) row.before_file_content = s.beforeFileContent;
-  if (s.afterFileContent !== undefined) row.after_file_content = s.afterFileContent;
-  if (s.workVolume !== undefined) row.work_volume = s.workVolume;
+  if (s.surveyorId != null) row.surveyor_id = s.surveyorId;
   if (s.approvedById !== undefined) row.approved_by_id = s.approvedById;
   if (s.approvedAt !== undefined) row.approved_at = s.approvedAt;
+  if (s.revisionOf !== undefined) row.revision_of = s.revisionOf ?? null;
+  if (s.notes !== undefined) row.notes = s.notes ?? null;
   return row;
 }
 

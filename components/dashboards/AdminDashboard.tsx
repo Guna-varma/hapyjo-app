@@ -29,15 +29,15 @@ export function AdminDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const activeSites = sites.filter((s) => s.status === 'active').length;
   const revenue = sites.reduce((sum, site) => {
     const siteVolume = surveys
-      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
-      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+      .filter((s) => s.status === 'approved' && s.siteId === site.id)
+      .reduce((v, s) => v + s.volumeM3, 0);
     return sum + siteVolume * (site.contractRateRwf ?? 0);
   }, 0);
   const totalCost = totalSpent;
   const profit = revenue - totalCost;
   const truckDistance = trips.filter((t) => t.status === 'completed').reduce((s, t) => s + t.distanceKm, 0);
   const machineHours = machineSessions.filter((m) => m.status === 'completed').reduce((s, m) => s + (m.durationHours ?? 0), 0);
-  const workVolume = surveys.filter((s) => s.status === 'approved').reduce((v, s) => v + (s.workVolume ?? 0), 0);
+  const workVolume = surveys.filter((s) => s.status === 'approved').reduce((v, s) => v + s.volumeM3, 0);
 
   const stats = [
     { icon: <Building2 size={24} color="#3B82F6" />, label: t('dashboard_active_sites'), value: activeSites.toString(), bg: 'bg-blue-50' },

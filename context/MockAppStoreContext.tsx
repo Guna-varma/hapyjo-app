@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import type {
   Site,
   Vehicle,
@@ -190,6 +191,8 @@ function useSupabaseStore(): MockAppStoreContextValue {
   const [loading, setLoading] = useState(true);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const currentUserRoleRef = useRef<string | null>(null);
+  const refetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const REFETCH_DEBOUNCE_MS = 400;
 
   const refetch = useCallback(async () => {
     if (!authUser) {
@@ -222,7 +225,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
         supabase.from('expenses').select('*'),
         supabase.from('trips').select('*'),
         supabase.from('machine_sessions').select('*'),
-        supabase.from('surveys').select('*'),
+        supabase.from('surveys').select('id, site_id, survey_date, volume_m3, status, surveyor_id, created_at, approved_by_id, approved_at, revision_of, notes').order('survey_date', { ascending: false }).limit(200),
         supabase.from('issues').select('*'),
         supabase.from('work_photos').select('*').order('created_at', { ascending: false }),
         supabase.from('site_assignments').select('*'),
@@ -277,7 +280,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
         try {
           const notifRes = await supabase
             .from('notifications')
-            .select('*')
+            .select('id, target_role, title, body, created_at, read, link_id, link_type')
             .eq('target_role', currentUserRole)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -312,7 +315,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       // Load assigned_trips in background (lightweight, non-blocking) so the app stays responsive
       void supabase
         .from('assigned_trips')
-        .select('*')
+        .select('id, site_id, vehicle_id, driver_id, vehicle_type, task_type, status, notes, created_by, created_at, started_at, paused_at, resumed_at, pause_segments, completed_at, completed_by')
         .order('created_at', { ascending: false })
         .limit(150)
         .then(
@@ -331,9 +334,24 @@ function useSupabaseStore(): MockAppStoreContextValue {
     }
   }, [authUser]);
 
+  const refetchDebounced = useCallback(() => {
+    if (refetchDebounceRef.current) clearTimeout(refetchDebounceRef.current);
+    refetchDebounceRef.current = setTimeout(() => {
+      refetchDebounceRef.current = null;
+      refetch();
+    }, REFETCH_DEBOUNCE_MS);
+  }, [refetch]);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') refetchDebounced();
+    });
+    return () => subscription.remove();
+  }, [refetchDebounced]);
 
   // Keep current user role in a ref so realtime INSERT handler can show system notification with no latency
   useEffect(() => {
@@ -345,22 +363,22 @@ function useSupabaseStore(): MockAppStoreContextValue {
     if (!authUser) return;
     const channel = supabase
       .channel('app-store-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sites' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'machine_sessions' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'issues' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_assignments' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_vehicle_assignments' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'assigned_trips' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'operations' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'gps_photos' }, () => refetch())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => refetch())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sites' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'machine_sessions' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'issues' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_assignments' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_vehicle_assignments' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assigned_trips' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'operations' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gps_photos' }, () => refetchDebounced())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => refetchDebounced())
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
@@ -389,10 +407,14 @@ function useSupabaseStore(): MockAppStoreContextValue {
       .subscribe();
     channelRef.current = channel;
     return () => {
+      if (refetchDebounceRef.current) {
+        clearTimeout(refetchDebounceRef.current);
+        refetchDebounceRef.current = null;
+      }
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [authUser, refetch]);
+  }, [authUser, refetchDebounced]);
 
   const setSites: SetSites = useCallback((arg) => {
     setState((prev) => ({ ...prev, sites: typeof arg === 'function' ? arg(prev.sites) : arg }));
@@ -658,8 +680,9 @@ function useSupabaseStore(): MockAppStoreContextValue {
     const siteName = state.sites.find((s) => s.id === survey.siteId)?.name;
     const surveyRows = buildNotificationRows('survey_submitted', { ...survey, siteName }, () => generateId('n'));
     for (const r of surveyRows) await supabase.from('notifications').insert(r);
-    await refetch();
-  }, [refetch, state.sites]);
+    setSurveys((prev) => [survey, ...prev]);
+    refetch().catch(() => {});
+  }, [refetch, state.sites, setSurveys]);
 
   const updateSurvey = useCallback(async (id: string, patch: Partial<Survey>) => {
     const row = surveyToRow(patch);

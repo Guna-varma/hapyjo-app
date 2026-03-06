@@ -9,7 +9,8 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { useLocale } from '@/context/LocaleContext';
-import { TrendingUp, Banknote, PieChart, Settings, FileText, Building2, Users, Globe } from 'lucide-react-native';
+import { TrendingUp, Banknote, PieChart, Settings, FileText, Building2, Users, Globe, BarChart3 } from 'lucide-react-native';
+import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { colors, layout, form } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
@@ -36,9 +37,32 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   }, [dateFrom, dateTo]);
 
   const surveysInRange = useMemo(
-    () => surveys.filter((s) => s.status === 'approved' && s.workVolume != null && inRange(s.createdAt)),
+    () => surveys.filter((s) => s.status === 'approved' && inRange(s.createdAt)),
     [surveys, inRange]
   );
+  const productionSurveysInRange = useMemo(
+    () => surveys.filter((s) => s.status === 'approved' && inRange(s.surveyDate)),
+    [surveys, inRange]
+  );
+  const dailyProductionData = useMemo(() => {
+    const byDate = new Map<string, number>();
+    for (const s of productionSurveysInRange) {
+      const d = s.surveyDate.slice(0, 10);
+      byDate.set(d, (byDate.get(d) ?? 0) + s.volumeM3);
+    }
+    return Array.from(byDate.entries())
+      .map(([date, volumeM3]) => ({ date, volumeM3 }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [productionSurveysInRange]);
+  const totalExcavationInRange = productionSurveysInRange.reduce((sum, s) => sum + s.volumeM3, 0);
+  const topSitesByVolume = useMemo(() => {
+    const siteVol: { siteId: string; volumeM3: number }[] = [];
+    for (const site of sites) {
+      const v = productionSurveysInRange.filter((s) => s.siteId === site.id).reduce((a, s) => a + s.volumeM3, 0);
+      siteVol.push({ siteId: site.id, volumeM3: v });
+    }
+    return siteVol.filter((x) => x.volumeM3 > 0).sort((a, b) => b.volumeM3 - a.volumeM3).slice(0, 5);
+  }, [sites, productionSurveysInRange]);
   const expensesInRange = useMemo(() => expenses.filter((e) => !e.date || inRange(e.date)), [expenses, inRange]);
 
   const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
@@ -46,7 +70,7 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const remaining = Math.max(0, totalBudget - totalSpent);
   const utilizationRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
   const revenue = sites.reduce((sum, site) => {
-    const siteVolume = surveysInRange.filter((s) => s.siteId === site.id).reduce((v, s) => v + (s.workVolume ?? 0), 0);
+    const siteVolume = surveysInRange.filter((s) => s.siteId === site.id).reduce((v, s) => v + s.volumeM3, 0);
     return sum + siteVolume * (site.contractRateRwf ?? 0);
   }, 0);
   const totalCost = expensesInRange.reduce((sum, e) => sum + e.amountRwf, 0);
@@ -199,6 +223,41 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
             </View>
           </Card>
         </View>
+
+        {/* Excavation production */}
+        <Card style={ownerStyles.contractCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <BarChart3 size={20} color={colors.primary} style={{ marginRight: 6 }} />
+            <Text style={ownerStyles.contractLabel}>{t('dashboard_excavation_production')}</Text>
+          </View>
+          <Text style={[ownerStyles.heroSmall, { marginBottom: 4 }]}>{t('dashboard_total_excavation_period')}</Text>
+          <Text style={[ownerStyles.heroNum, { marginBottom: 12 }]}>{totalExcavationInRange.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³</Text>
+          <Text style={[ownerStyles.heroSmall, { marginBottom: 6 }]}>{t('dashboard_daily_production')}</Text>
+          <DailyProductionChart
+            data={dailyProductionData}
+            maxBars={14}
+            emptyMessage={t('dashboard_no_production_data')}
+            onPressDate={onNavigateTab ? (date) => onNavigateTab('surveys', { filterByDate: date }) : undefined}
+          />
+          {topSitesByVolume.length > 0 && (
+            <>
+              <Text style={[ownerStyles.heroSmall, { marginTop: 12, marginBottom: 6 }]}>{t('dashboard_top_sites_volume')}</Text>
+              {topSitesByVolume.map(({ siteId, volumeM3 }) => {
+                const site = sites.find((s) => s.id === siteId);
+                const pct = totalExcavationInRange > 0 ? (volumeM3 / totalExcavationInRange) * 100 : 0;
+                return (
+                  <View key={siteId} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={{ flex: 1, fontSize: 13, color: colors.text }} numberOfLines={1}>{site?.name ?? siteId}</Text>
+                    <View style={{ flex: 1, height: 8, backgroundColor: colors.gray100, borderRadius: 4, overflow: 'hidden' }}>
+                      <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.primary, borderRadius: 4 }} />
+                    </View>
+                    <Text style={{ width: 56, fontSize: 12, fontWeight: '600', textAlign: 'right', marginLeft: 6 }}>{volumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³</Text>
+                  </View>
+                );
+              })}
+            </>
+          )}
+        </Card>
 
         {sites.length > 0 && (
           <Card style={ownerStyles.contractCard}>

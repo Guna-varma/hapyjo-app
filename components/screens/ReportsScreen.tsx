@@ -296,10 +296,10 @@ export function ReportsScreen() {
         const tripsInMonth = trips.filter((t) => t.status === 'completed' && inMonth(t.startTime));
         const sessionsInMonth = machineSessions.filter((m) => m.status === 'completed' && inMonth(m.startTime));
         const expensesInMonth = expenses.filter((e) => e.date && inMonth(e.date));
-        const surveysInMonth = surveys.filter((s) => s.status === 'approved' && s.workVolume != null && s.createdAt && inMonth(s.createdAt));
+        const surveysInMonth = surveys.filter((s) => s.status === 'approved' && s.createdAt && inMonth(s.createdAt));
         const revenueInMonth = surveysInMonth.reduce((sum, s) => {
           const site = sites.find((site) => site.id === s.siteId);
-          return sum + (s.workVolume! * (site?.contractRateRwf ?? 0));
+          return sum + (s.volumeM3 * (site?.contractRateRwf ?? 0));
         }, 0);
         const spentInMonth = expensesInMonth.reduce((s, e) => s + e.amountRwf, 0);
         const fuelCostInMonth = expensesInMonth.filter((e) => e.type === 'fuel').reduce((s, e) => s + e.amountRwf, 0);
@@ -350,10 +350,10 @@ export function ReportsScreen() {
       const tripsInMonth = trips.filter((t) => t.status === 'completed' && inMonth(t.startTime));
       const sessionsInMonth = machineSessions.filter((m) => m.status === 'completed' && inMonth(m.startTime));
       const expensesInMonth = expenses.filter((e) => e.date && inMonth(e.date));
-      const surveysInMonth = surveys.filter((s) => s.status === 'approved' && s.workVolume != null && s.createdAt && inMonth(s.createdAt));
+      const surveysInMonth = surveys.filter((s) => s.status === 'approved' && s.createdAt && inMonth(s.createdAt));
       const revenueInMonth = surveysInMonth.reduce((sum, s) => {
         const site = sites.find((site) => site.id === s.siteId);
-        return sum + (s.workVolume! * (site?.contractRateRwf ?? 0));
+        return sum + (s.volumeM3 * (site?.contractRateRwf ?? 0));
       }, 0);
       const spentInMonth = expensesInMonth.reduce((s, e) => s + e.amountRwf, 0);
       const fuelCostInMonth = expensesInMonth.filter((e) => e.type === 'fuel').reduce((s, e) => s + e.amountRwf, 0);

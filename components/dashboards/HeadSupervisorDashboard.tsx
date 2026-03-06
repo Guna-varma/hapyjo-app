@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { SiteCard } from '@/components/sites/SiteCard';
@@ -8,7 +8,8 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import { colors, layout } from '@/theme/tokens';
-import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck } from 'lucide-react-native';
+import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck, BarChart3 } from 'lucide-react-native';
+import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 
@@ -22,11 +23,23 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
   const activeSites = sites.filter((s) => s.status === 'active').length;
   const revenue = sites.reduce((sum, site) => {
     const siteVolume = surveys
-      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
-      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+      .filter((s) => s.status === 'approved' && s.siteId === site.id)
+      .reduce((v, s) => v + s.volumeM3, 0);
     return sum + siteVolume * (site.contractRateRwf ?? 0);
   }, 0);
   const profit = revenue - totalSpent;
+
+  const dailyProductionData = useMemo(() => {
+    const approved = surveys.filter((s) => s.status === 'approved');
+    const byDate = new Map<string, number>();
+    for (const s of approved) {
+      const d = s.surveyDate.slice(0, 10);
+      byDate.set(d, (byDate.get(d) ?? 0) + s.volumeM3);
+    }
+    return Array.from(byDate.entries())
+      .map(([date, volumeM3]) => ({ date, volumeM3 }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [surveys]);
 
   const stats = [
     { icon: <Building2 size={24} color="#3B82F6" />, label: t('dashboard_active_sites'), value: activeSites.toString(), bg: 'bg-blue-50' },
@@ -89,6 +102,19 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
             </Card>
           ))}
         </View>
+        <Card style={hsStyles.quickCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <BarChart3 size={20} color={colors.primary} style={{ marginRight: 6 }} />
+            <Text style={hsStyles.quickTitle}>{t('dashboard_excavation_production')}</Text>
+          </View>
+          <Text style={[hsStyles.statLabel, { marginBottom: 6 }]}>{t('dashboard_daily_production')}</Text>
+          <DailyProductionChart
+            data={dailyProductionData}
+            maxBars={14}
+            emptyMessage={t('dashboard_no_production_data')}
+            onPressDate={onNavigateTab ? (date) => onNavigateTab('surveys', { filterByDate: date }) : undefined}
+          />
+        </Card>
         {sites.length > 0 && (
           <View style={hsStyles.section}>
             <Text style={hsStyles.sectionTitle}>{t('dashboard_site_locations')}</Text>

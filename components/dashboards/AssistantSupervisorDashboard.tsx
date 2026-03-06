@@ -14,7 +14,8 @@ import { colors, spacing, radius } from '@/theme/tokens';
 import { getRoleLabelKey } from '@/lib/rbac';
 import type { Task, AssignedTrip, UserRole } from '@/types';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
-import { Users, Fuel, CheckCircle2, User, Phone, Truck, Pencil, PhoneCall, Percent, Wrench } from 'lucide-react-native';
+import { Users, Fuel, CheckCircle2, User, Phone, Truck, Pencil, PhoneCall, Percent, Wrench, BarChart3 } from 'lucide-react-native';
+import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { generateId } from '@/lib/id';
 import { getInitialStatusForVehicleType, getCompletedStatus, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import { ProgressBar } from '@/components/ui/ProgressBar';
@@ -60,7 +61,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const { user } = useAuth();
   const { t } = useLocale();
   const { showToast } = useToast();
-  const { sites, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, addAssignedTrip, updateAssignedTripStatus, updateUser } = useMockAppStore();
+  const { sites, surveys, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, addAssignedTrip, updateAssignedTripStatus, updateUser } = useMockAppStore();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editPhoneUserId, setEditPhoneUserId] = useState<string | null>(null);
   const [editPhoneValue, setEditPhoneValue] = useState('');
@@ -75,6 +76,18 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
 
   const siteIds = user?.siteAccess ?? [];
   const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0] ?? null;
+  const mySiteIds = assignedSite ? [assignedSite.id] : siteIds.length > 0 ? siteIds : sites.map((s) => s.id);
+  const dailyProductionData = useMemo(() => {
+    const approved = surveys.filter((s) => s.status === 'approved' && mySiteIds.includes(s.siteId));
+    const byDate = new Map<string, number>();
+    for (const s of approved) {
+      const d = s.surveyDate.slice(0, 10);
+      byDate.set(d, (byDate.get(d) ?? 0) + s.volumeM3);
+    }
+    return Array.from(byDate.entries())
+      .map(([date, volumeM3]) => ({ date, volumeM3 }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [surveys, mySiteIds]);
   const TEMPLATE_ORDER = [
     'Pre-cut survey',
     'Land clearing',
@@ -559,6 +572,22 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
               </View>
             </Card>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.section}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <BarChart3 size={20} color={colors.primary} style={{ marginRight: 6 }} />
+            <Text style={styles.sectionTitle}>{t('dashboard_excavation_production')}</Text>
+          </View>
+          <Card style={{ padding: spacing.md }}>
+            <Text style={[styles.actionHint, { marginBottom: 6 }]}>{t('dashboard_daily_production')}</Text>
+            <DailyProductionChart
+              data={dailyProductionData}
+              maxBars={14}
+              emptyMessage={t('dashboard_no_production_data')}
+              onPressDate={onNavigateTab ? (date) => onNavigateTab('surveys', { filterByDate: date }) : undefined}
+            />
+          </Card>
         </View>
       </DashboardLayout>
 

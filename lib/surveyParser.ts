@@ -4,18 +4,18 @@
  * File 1 (TOP / Before): pointId, Easting (X), Northing (Y), Altitude (Z), Code/Layer, Distance/Offset
  * File 2 (After):        pointId, Easting (X), Northing (Y), Altitude (Z), Attr1, Attr2
  *
- * --- EXACT FORMULA (COVADIS / TIN standard) ---
+ * --- FORMULA (COVADIS / TIN standard) ---
  *
  * 1. Build TIN (Delaunay) on Before points → triangles with vertices (X,Y,Z_before).
- * 2. For each triangle, get Z_after at the same (X,Y) vertices (interpolated from After surface).
- * 3. Height difference at each vertex:  h_i = Z_before_i − Z_after_i
- * 4. Horizontal (2D) area:  A = ½ |x₁(y₂−y₃) + x₂(y₃−y₁) + x₃(y₁−y₂)|
- * 5. Volume of this triangular prism:
- *      V = A × (h₁ + h₂ + h₃) / 3
- * 6. Total Cut (Déblai) = Σ V for all triangles where V > 0 (earth removed).
- *    Total Fill (Remblai) = Σ |V| for all triangles where V < 0 (earth added).
+ * 2. Build convex hull of AFTER points → excavation boundary; only triangles inside hull are included.
+ * 3. For each before triangle whose centroid is inside the hull: get Z_after at vertices (interpolated).
+ * 4. Height difference: h_i = Z_before_i − Z_after_i
+ * 5. Horizontal area: A = ½ |x₁(y₂−y₃) + x₂(y₃−y₁) + x₃(y₁−y₂)|
+ * 6. Volume: V = A × (h₁ + h₂ + h₃) / 3
+ * 7. Total Cut = Σ V (V>0), Total Fill = Σ |V| (V<0).
  *
- * Display: Total (cut) in m³ to 2 decimal places, same value for surveyor and all roles.
+ * Boundary clipping uses the convex hull of AFTER points; only triangles inside the hull are included.
+ * Breakline enforcement: any triangle whose edge crosses a hull edge is rejected (TIN must not cross excavation boundary).
  */
 
 import Delaunator from 'delaunator';
@@ -152,6 +152,98 @@ function triangleArea2D(
   return Math.abs((ax * (by - cy) + bx * (cy - ay) + cx * (ay - by)) / 2);
 }
 
+/** 2D point for hull and polygon. */
+interface Point2D {
+  x: number;
+  y: number;
+}
+
+/**
+ * Cross product (b - a) × (c - a). Positive = counterclockwise.
+ */
+function cross(a: Point2D, b: Point2D, c: Point2D): number {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+/**
+ * Convex hull of 2D points (Graham scan). O(n log n).
+ * Returns hull vertices in counterclockwise order.
+ */
+function convexHull2D(points: Point2D[]): Point2D[] {
+  if (points.length < 3) return points.slice();
+  const sorted = points.slice().sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x);
+  const start = sorted[0];
+  const rest = sorted.slice(1).sort((a, b) => {
+    const angleA = Math.atan2(a.y - start.y, a.x - start.x);
+    const angleB = Math.atan2(b.y - start.y, b.x - start.x);
+    return angleA !== angleB ? angleA - angleB : (a.x - start.x) ** 2 + (a.y - start.y) ** 2 - (b.x - start.x) ** 2 - (b.y - start.y) ** 2;
+  });
+  const hull: Point2D[] = [start, rest[0]];
+  for (let i = 1; i < rest.length; i++) {
+    const p = rest[i];
+    while (hull.length >= 2 && cross(hull[hull.length - 2], hull[hull.length - 1], p) <= 0) {
+      hull.pop();
+    }
+    hull.push(p);
+  }
+  return hull;
+}
+
+/**
+ * Point-in-polygon (ray casting). Polygon in counterclockwise order.
+ */
+function pointInPolygon(px: number, py: number, polygon: Point2D[]): boolean {
+  const n = polygon.length;
+  if (n < 3) return false;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+/** Orientation of r relative to segment (p,q): positive = left, negative = right, 0 = collinear. */
+function orient(px: number, py: number, qx: number, qy: number, rx: number, ry: number): number {
+  return (qx - px) * (ry - py) - (qy - py) * (rx - px);
+}
+
+/**
+ * True if segments (a1,a2) and (b1,b2) properly intersect (cross in the interior).
+ * Used for breakline enforcement: reject triangles that cross the boundary.
+ */
+function segmentIntersect(
+  a1x: number, a1y: number, a2x: number, a2y: number,
+  b1x: number, b1y: number, b2x: number, b2y: number
+): boolean {
+  const o1 = orient(a1x, a1y, a2x, a2y, b1x, b1y);
+  const o2 = orient(a1x, a1y, a2x, a2y, b2x, b2y);
+  const o3 = orient(b1x, b1y, b2x, b2y, a1x, a1y);
+  const o4 = orient(b1x, b1y, b2x, b2y, a2x, a2y);
+  if (o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0) {
+    return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0);
+  }
+  return false;
+}
+
+/**
+ * True if any edge of triangle (p0,p1,p2) intersects any edge of the hull (breakline check).
+ */
+function triangleIntersectsHull(p0: Point2D, p1: Point2D, p2: Point2D, hull: Point2D[]): boolean {
+  const n = hull.length;
+  if (n < 2) return false;
+  const triEdges: [Point2D, Point2D][] = [[p0, p1], [p1, p2], [p2, p0]];
+  for (const [a, b] of triEdges) {
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      if (segmentIntersect(a.x, a.y, b.x, b.y, hull[j].x, hull[j].y, hull[i].x, hull[i].y)) return true;
+    }
+  }
+  return false;
+}
+
 export interface CubatureResult {
   /** Total cut volume (Déblai), m³ - earth removed */
   totalCut: number;
@@ -165,6 +257,7 @@ export interface CubatureResult {
 
 /**
  * Compute cubature: TIN on Before, Z_after from After TIN (barycentric) or IDW fallback.
+ * Triangles outside the AFTER convex hull are excluded (boundary clipping) for Covadis-like accuracy.
  * Formula: V = A × (h₁ + h₂ + h₃) / 3  per triangle; h_i = Z_before_i − Z_after_i.
  */
 export function computeCubature(
@@ -189,9 +282,13 @@ export function computeCubature(
       ? interpolateZFromTIN(afterPoints, afterCoords, dAfter, x, y)
       : interpolateZIDW(afterPoints, x, y);
 
+  const afterBoundary = convexHull2D(afterPoints.map((p) => ({ x: p.x, y: p.y })));
+  const useBoundaryClip = afterBoundary.length >= 3;
+
   let totalCut = 0;
   let totalFill = 0;
   let surfaceUtile = 0;
+  let triangleCount = 0;
 
   for (let i = 0; i < triangles.length; i += 3) {
     const i0 = triangles[i];
@@ -200,6 +297,16 @@ export function computeCubature(
     const p0 = beforePoints[i0];
     const p1 = beforePoints[i1];
     const p2 = beforePoints[i2];
+
+    if (useBoundaryClip) {
+      const cx = (p0.x + p1.x + p2.x) / 3;
+      const cy = (p0.y + p1.y + p2.y) / 3;
+      if (!pointInPolygon(cx, cy, afterBoundary)) continue;
+      if (triangleIntersectsHull(
+        { x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }, { x: p2.x, y: p2.y },
+        afterBoundary
+      )) continue;
+    }
 
     const z1_0 = p0.elevation;
     const z1_1 = p1.elevation;
@@ -217,6 +324,7 @@ export function computeCubature(
     const V = A * (h0 + h1 + h2) / 3;
 
     surfaceUtile += A;
+    triangleCount += 1;
     if (V > 0) totalCut += V;
     else totalFill += Math.abs(V);
   }
@@ -225,7 +333,7 @@ export function computeCubature(
     totalCut,
     totalFill,
     surfaceUtile,
-    triangleCount: triangles.length / 3,
+    triangleCount,
   };
 }
 

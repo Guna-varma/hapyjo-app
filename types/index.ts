@@ -70,6 +70,8 @@ export interface Site {
   vehicleIds?: string[];
   /** When updating, pass null to clear the rate. */
   contractRateRwf?: number | null;
+  /** Running total of approved survey volume (maintained by DB trigger). Use for fast progress. */
+  totalExcavatedM3?: number;
 }
 
 /** One row per budget allocation (additive). Total site budget = sum of allocations. */
@@ -114,25 +116,19 @@ export interface SiteTask {
   updatedAt: string;
 }
 
+/** Lightweight survey: only result stored (no files). */
 export interface Survey {
   id: string;
-  type: string;
   siteId: string;
-  siteName: string;
+  surveyDate: string; // ISO date YYYY-MM-DD
+  volumeM3: number;
+  status: 'approval_pending' | 'approved' | 'rejected';
   surveyorId: string;
-  measurements: Record<string, any>;
-  location?: {
-    latitude: number;
-    longitude: number;
-  };
-  photos?: string[];
-  status: 'draft' | 'submitted' | 'approved';
   createdAt: string;
-  beforeFileContent?: string;
-  afterFileContent?: string;
-  workVolume?: number;
-  approvedById?: string;
-  approvedAt?: string;
+  approvedById?: string | null;
+  approvedAt?: string | null;
+  revisionOf?: string;
+  notes?: string | null;
 }
 
 export type ExpenseType = 'general' | 'fuel';

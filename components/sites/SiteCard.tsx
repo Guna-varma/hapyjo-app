@@ -14,7 +14,7 @@ interface SiteCardProps {
   onPress?: () => void;
 }
 
-export function SiteCard({ site, onPress }: SiteCardProps) {
+function SiteCardInner({ site, onPress }: SiteCardProps) {
   const { t } = useLocale();
   const budgetUtilization = site.budget && site.budget > 0 ? (site.spent / site.budget) * 100 : 0;
   const progressPct = Math.round(site.progress ?? 0);
@@ -128,3 +128,5 @@ export function SiteCard({ site, onPress }: SiteCardProps) {
     </TouchableOpacity>
   );
 }
+
+export const SiteCard = React.memo(SiteCardInner);

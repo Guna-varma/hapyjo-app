@@ -75,11 +75,15 @@ export function AppNavigation() {
   );
   const [activeTab, setActiveTabState] = useState<TabId>(tabIds[0]);
   const [openNewSurveyModalOnce, setOpenNewSurveyModalOnce] = useState(false);
+  const [openReviseSurveyIdOnce, setOpenReviseSurveyIdOnce] = useState<string | null>(null);
+  const [surveyDateFilterOnce, setSurveyDateFilterOnce] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
 
   const setActiveTab = useCallback((tab: TabId, params?: SurveyNavParams) => {
     if (tab === 'surveys' && params?.openNewSurvey) setOpenNewSurveyModalOnce(true);
+    if (tab === 'surveys' && params?.openReviseSurveyId) setOpenReviseSurveyIdOnce(params.openReviseSurveyId);
+    if (tab === 'surveys' && params?.filterByDate) setSurveyDateFilterOnce(params.filterByDate);
     setActiveTabState(tab);
   }, []);
 
@@ -140,6 +144,10 @@ export function AppNavigation() {
           <SurveysScreen
             initialOpenNewSurveyModal={openNewSurveyModalOnce}
             onClearOpenNewSurveyModal={() => setOpenNewSurveyModalOnce(false)}
+            initialOpenReviseSurveyId={openReviseSurveyIdOnce ?? undefined}
+            onClearOpenReviseSurveyId={() => setOpenReviseSurveyIdOnce(null)}
+            initialSurveyDateFilter={surveyDateFilterOnce ?? undefined}
+            onClearSurveyDateFilter={() => setSurveyDateFilterOnce(null)}
           />
         );
       case 'issues':

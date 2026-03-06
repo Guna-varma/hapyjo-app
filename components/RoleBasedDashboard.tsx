@@ -13,6 +13,9 @@ import type { TabId } from '@/lib/rbac';
 
 export interface SurveyNavParams {
   openNewSurvey?: boolean;
+  openReviseSurveyId?: string;
+  /** Navigate to Surveys tab filtered by this date (YYYY-MM-DD). Used when clicking a day in Excavation production. */
+  filterByDate?: string;
 }
 
 export interface DashboardNavProps {

@@ -21,8 +21,8 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
   const remaining = Math.max(0, totalBudget - totalSpent);
   const revenue = sites.reduce((sum, site) => {
     const siteVolume = surveys
-      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
-      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+      .filter((s) => s.status === 'approved' && s.siteId === site.id)
+      .reduce((v, s) => v + s.volumeM3, 0);
     return sum + siteVolume * (site.contractRateRwf ?? 0);
   }, 0);
   const totalCost = totalSpent;
@@ -30,8 +30,8 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
 
   const siteAllocations = sites.map((site) => {
     const siteVolume = surveys
-      .filter((s) => s.status === 'approved' && s.workVolume != null && s.siteId === site.id)
-      .reduce((v, s) => v + (s.workVolume ?? 0), 0);
+      .filter((s) => s.status === 'approved' && s.siteId === site.id)
+      .reduce((v, s) => v + s.volumeM3, 0);
     const siteRevenue = siteVolume * (site.contractRateRwf ?? 0);
     return { site, budget: site.budget ?? 0, spent: site.spent ?? 0, revenue: siteRevenue };
   });
