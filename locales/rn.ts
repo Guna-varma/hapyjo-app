@@ -175,10 +175,15 @@ export const rn: Record<EnKeys, string> = {
   location_required_trip_end: 'Aho urangiza urugendo bikenewe kugira uburebure. Nyamuneka emera aho uri.',
 
   trip_start_location_note: 'Aho uri (GPS) izandikwa igihe utangira urugendo.',
+  trip_start_take_gps_photo: 'Fata ishusho ya GPS kugira utangire',
+  trip_start_photo_hint: 'Fata ishusho isobanutse; urashobora kufata nindi niba idasobanutse.',
+  trip_retake_photo: 'Fata nindi',
   trip_end_modal_title: 'Rangiza urugendo',
   trip_end_modal_message: 'Ongeraho ishusho ya GPS kugira ngo ubonere urugendo (birabujijwe). Aho urangiza izandikwa mu buryo bwikora.',
-  trip_end_add_photo: 'Ongeraho ishusho ya GPS & rangiza',
+  trip_end_add_photo: 'Fata ishusho ya GPS & rangiza',
   trip_end_without_photo: 'Rangiza utarimo ishusho',
+  trip_end_retake: 'Fata nindi',
+  trip_end_use_photo: 'Rangiza urugendo n\'ishusho iyi',
 
   issues_raise_modal_title: 'Tangaza ikibazo',
   issues_raise_modal_subtitle: 'Sobanura ikibazo unashyira amashusho niba bikenewe. Abakoresha bazamenyeshwa.',

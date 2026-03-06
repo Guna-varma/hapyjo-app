@@ -179,11 +179,13 @@ export function DriverDashboard(_props: DashboardNavProps = {}) {
                   if (tel) Linking.openURL(`tel:${tel}`).catch(() => {});
                 }}
                 style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
-                hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Phone size={20} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.callButtonText}>{t('driver_call_manager')}</Text>
-                <Text style={styles.callButtonNumber}>{managerUser.phone}</Text>
+                <Phone size={20} color="#fff" style={styles.callButtonIcon} />
+                <View style={styles.callButtonLabels}>
+                  <Text style={styles.callButtonText}>{t('driver_call_manager')}</Text>
+                  <Text style={styles.callButtonNumber} numberOfLines={1}>{managerUser.phone}</Text>
+                </View>
               </Pressable>
             ) : (
               <View style={styles.noPhoneWrap}>
@@ -306,25 +308,31 @@ const styles = StyleSheet.create({
   callButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     minHeight: 48,
   },
   callButtonPressed: {
-    opacity: 0.85,
+    opacity: 0.9,
+  },
+  callButtonIcon: {
+    marginRight: 12,
+  },
+  callButtonLabels: {
+    flex: 1,
+    justifyContent: 'center',
   },
   callButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#fff',
-    marginRight: 8,
   },
   callButtonNumber: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.95)',
+    marginTop: 2,
   },
   noPhoneWrap: {
     flexDirection: 'row',

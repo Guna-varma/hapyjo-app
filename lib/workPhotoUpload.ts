@@ -1,8 +1,8 @@
-import * as FileSystem from 'expo-file-system';
+import { File, Directory, Paths } from 'expo-file-system';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
-import { getUriSizeInBytes, ISSUE_IMAGE_MAX_INPUT_BYTES } from '@/lib/compressIssueImage';
+import { getUriSizeInBytes } from '@/lib/compressIssueImage';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 const BUCKET = 'work-photos';
@@ -14,7 +14,9 @@ const MAX_WIDTH = 1280;
 const THUMB_WIDTH = 320;
 const PHOTO_QUALITY = 0.45;
 const PHOTO_QUALITY_LOW = 0.28;
+const PHOTO_QUALITY_MIN = 0.18;
 const THUMB_QUALITY = 0.5;
+const MAX_WIDTH_SMALL = 800;
 
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.heif', '.heic', '.webp']);
 const ALLOWED_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/heif', 'image/heic', 'image/webp']);
@@ -48,48 +50,37 @@ export async function validateAndPrepareWorkPhoto(localUri: string): Promise<{ u
   if (size === 0) {
     throw new Error('Image file is empty.');
   }
-  if (size > ISSUE_IMAGE_MAX_INPUT_BYTES) {
-    throw new Error('Image size must not exceed 5MB.');
-  }
-  // Web blob: no FileSystem compress; accept if already under target or use as-is for upload
-  if (isBlobUri(localUri)) {
-    if (size <= TARGET_PHOTO_BYTES) return { uri: localUri, size };
-    // Too large blob: try canvas resize on web (same as compressToTargetSize but via blob)
-    if (Platform.OS === 'web') {
-      const compressed = await compressToTargetSizeBlob(localUri);
-      return compressed;
-    }
-    throw new Error('Image size must not exceed 5MB.');
-  }
-  if (size >= MIN_ACCEPTED_BYTES && size <= TARGET_PHOTO_BYTES) {
+  // Always compress to 30–50 KB when over target; no upper size limit (compress any size).
+  if (size <= TARGET_PHOTO_BYTES && size >= MIN_ACCEPTED_BYTES) {
     return { uri: localUri, size };
   }
   if (size < MIN_ACCEPTED_BYTES) {
     return { uri: localUri, size };
   }
-  const compressed = await compressToTargetSize(localUri);
-  return compressed;
+  // Over 50 KB: always compress to 30–50 KB (any input size)
+  return compressToTargetSize(localUri);
 }
 
 async function compressToTargetSize(localUri: string): Promise<{ uri: string; size: number }> {
-  let result = await ImageManipulator.manipulateAsync(
-    localUri,
-    [{ resize: { width: MAX_WIDTH } }],
-    { compress: PHOTO_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: false }
-  );
-  if (!result.uri) throw new Error('Compression produced no output');
-  if (Platform.OS !== 'web') {
-    const info = await FileSystem.getInfoAsync(result.uri, { size: true });
-    const outSize = typeof (info as { size?: number }).size === 'number' ? (info as { size: number }).size : 0;
-    if (outSize > TARGET_PHOTO_BYTES) {
-      const retry = await ImageManipulator.manipulateAsync(
-        localUri,
-        [{ resize: { width: MAX_WIDTH } }],
-        { compress: PHOTO_QUALITY_LOW, format: ImageManipulator.SaveFormat.JPEG, base64: false }
-      );
-      if (retry.uri) result = retry;
-    }
+  const attempts: { width: number; quality: number }[] = [
+    { width: MAX_WIDTH, quality: PHOTO_QUALITY },
+    { width: MAX_WIDTH, quality: PHOTO_QUALITY_LOW },
+    { width: MAX_WIDTH_SMALL, quality: PHOTO_QUALITY_LOW },
+    { width: MAX_WIDTH_SMALL, quality: PHOTO_QUALITY_MIN },
+  ];
+  let result: { uri: string } | null = null;
+  for (const { width, quality } of attempts) {
+    const res = await ImageManipulator.manipulateAsync(
+      localUri,
+      [{ resize: { width } }],
+      { compress: quality, format: ImageManipulator.SaveFormat.JPEG, base64: false }
+    );
+    if (!res.uri) continue;
+    result = res;
+    const outSize = await getUriSizeInBytes(res.uri);
+    if (outSize <= TARGET_PHOTO_BYTES) break;
   }
+  if (!result?.uri) throw new Error('Compression produced no output');
   const finalSize = await getUriSizeInBytes(result.uri);
   return { uri: result.uri, size: finalSize };
 }

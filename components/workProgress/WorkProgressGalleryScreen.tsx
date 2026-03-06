@@ -84,20 +84,22 @@ export function WorkProgressGalleryScreen({
                 activeOpacity={0.8}
               >
                 <Image source={{ uri: p.thumbnailUrl }} style={styles.thumb} resizeMode="cover" />
-                <View style={styles.cardBody}>
-                  <Text style={styles.siteName} numberOfLines={1}>
-                    {getSiteName(p.siteId)}
-                  </Text>
-                  <Text style={styles.meta} numberOfLines={1}>
-                    {t('work_photo_uploaded_by')}: {getUserName(p.uploadedBy)}
-                  </Text>
-                  <Text style={styles.meta} numberOfLines={1}>
-                    {t('work_photo_user_role')}: {t(`role_${p.userRole}` as Parameters<typeof t>[0])}
-                  </Text>
-                  <Text style={styles.date}>
-                    {new Date(p.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}{' '}
-                    {new Date(p.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+                <View style={styles.cardRight}>
+                  <View style={styles.cardBody}>
+                    <Text style={styles.siteName} numberOfLines={1}>
+                      {getSiteName(p.siteId)}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {t('work_photo_uploaded_by')}: {getUserName(p.uploadedBy)}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {t('work_photo_user_role')}: {t(`role_${p.userRole}` as Parameters<typeof t>[0])}
+                    </Text>
+                    <Text style={styles.date}>
+                      {new Date(p.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}{' '}
+                      {new Date(p.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </View>
                 </View>
               </TouchableOpacity>
             ))}
@@ -172,7 +174,8 @@ function makeStyles(theme: ReturnType<typeof useResponsiveTheme>) {
       borderColor: colors.border,
     },
     thumb: { width: thumbSize, height: thumbSize },
-    cardBody: { flex: 1, padding: spacing.sm, justifyContent: 'center' },
+    cardRight: { flex: 1, padding: spacing.sm },
+    cardBody: { justifyContent: 'center' },
     siteName: { fontSize: 15, fontWeight: '600', color: colors.text },
     meta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
     date: { fontSize: 11, color: colors.textMuted, marginTop: 4 },

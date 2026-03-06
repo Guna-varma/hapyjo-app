@@ -11,11 +11,10 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useLocale } from '@/context/LocaleContext';
 import { colors, radius, spacing } from '@/theme/tokens';
-import { MapPreview } from './MapPreview';
 import type { WorkPhoto } from '@/types';
 
 export function WorkPhotoDetailModal({
@@ -32,6 +31,13 @@ export function WorkPhotoDetailModal({
   const { t } = useLocale();
   const dateStr = new Date(photo.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' });
   const timeStr = new Date(photo.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const hasLocation = Number.isFinite(photo.latitude) && Number.isFinite(photo.longitude);
+
+  const openInGoogleMaps = () => {
+    if (!hasLocation) return;
+    const url = `https://www.google.com/maps?q=${photo.latitude},${photo.longitude}`;
+    Linking.openURL(url);
+  };
 
   const handleDownload = async () => {
     try {
@@ -45,7 +51,7 @@ export function WorkPhotoDetailModal({
         a.click();
         document.body.removeChild(a);
       } else {
-        const filename = FileSystem.documentDirectory + `work-photo-${photo.id}.jpg`;
+        const filename = (FileSystem.documentDirectory ?? '') + `work-photo-${photo.id}.jpg`;
         const { uri } = await FileSystem.downloadAsync(photo.photoUrl, filename);
         const canShare = await Sharing.isAvailableAsync();
         if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg' });
@@ -72,9 +78,9 @@ export function WorkPhotoDetailModal({
               <Text style={styles.metaLabel}>{t('work_photo_site')}</Text>
               <Text style={styles.metaValue}>{siteName}</Text>
               <Text style={styles.metaLabel}>{t('work_photo_watermark_lat')}</Text>
-              <Text style={styles.metaValue}>{photo.latitude.toFixed(6)}</Text>
+              <Text style={styles.metaValue}>{hasLocation ? photo.latitude.toFixed(6) : '—'}</Text>
               <Text style={styles.metaLabel}>{t('work_photo_watermark_long')}</Text>
-              <Text style={styles.metaValue}>{photo.longitude.toFixed(6)}</Text>
+              <Text style={styles.metaValue}>{hasLocation ? photo.longitude.toFixed(6) : '—'}</Text>
               <Text style={styles.metaLabel}>{t('work_photo_watermark_date')}</Text>
               <Text style={styles.metaValue}>{dateStr}</Text>
               <Text style={styles.metaLabel}>{t('work_photo_watermark_time')}</Text>
@@ -84,10 +90,11 @@ export function WorkPhotoDetailModal({
               <Text style={styles.metaLabel}>{t('work_photo_user_role')}</Text>
               <Text style={styles.metaValue}>{t(`role_${photo.userRole}` as Parameters<typeof t>[0])}</Text>
             </View>
-            <View style={styles.mapWrap}>
-              <Text style={styles.mapLabel}>Map</Text>
-              <MapPreview latitude={photo.latitude} longitude={photo.longitude} style={styles.map} />
-            </View>
+            {hasLocation && (
+              <TouchableOpacity onPress={openInGoogleMaps} style={styles.googleMapsBtn} activeOpacity={0.8}>
+                <Text style={styles.googleMapsBtnText}>Preview in Google Maps</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={handleDownload} style={styles.downloadBtn}>
               <Text style={styles.downloadBtnText}>{t('work_photo_download')}</Text>
             </TouchableOpacity>
@@ -126,9 +133,15 @@ const styles = StyleSheet.create({
   metaBlock: { marginTop: spacing.md },
   metaLabel: { fontSize: 11, color: colors.textMuted, marginTop: spacing.xs, textTransform: 'uppercase', letterSpacing: 0.3 },
   metaValue: { fontSize: 14, color: colors.text, fontWeight: '500' },
-  mapWrap: { marginTop: spacing.lg },
-  mapLabel: { fontSize: 12, fontWeight: '600', color: colors.textSecondary, marginBottom: spacing.xs },
-  map: { marginTop: spacing.xs },
+  googleMapsBtn: {
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: '#4285F4',
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  googleMapsBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   downloadBtn: {
     marginTop: spacing.lg,
     paddingVertical: spacing.md,

@@ -173,10 +173,15 @@ export const en = {
   location_required_trip_end: 'Trip end location is required to record distance. Please enable location.',
 
   trip_start_location_note: 'Your GPS location will be recorded at trip start.',
+  trip_start_take_gps_photo: 'Take GPS photo to start',
+  trip_start_photo_hint: 'Take a clear photo; you can retake if it’s blurry.',
+  trip_retake_photo: 'Retake',
   trip_end_modal_title: 'End trip',
   trip_end_modal_message: 'Add a GPS photo to document the trip end (recommended). Your end location will be recorded automatically.',
-  trip_end_add_photo: 'Add GPS photo & end trip',
+  trip_end_add_photo: 'Take GPS photo & end trip',
   trip_end_without_photo: 'End without photo',
+  trip_end_retake: 'Retake',
+  trip_end_use_photo: 'End trip with this photo',
 
   issues_raise_modal_title: 'Report an issue',
   issues_raise_modal_subtitle: 'Describe the issue and attach photos if needed. Supervisors will be notified.',

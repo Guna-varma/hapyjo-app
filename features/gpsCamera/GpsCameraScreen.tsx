@@ -44,8 +44,22 @@ export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
   const canCapture = canAccess && (user?.role === 'assistant_supervisor' || user?.role === 'surveyor');
   const mySiteIds = useMemo(() => {
     if (!user?.id) return [];
-    return siteAssignments.filter((a) => a.userId === user.id).map((a) => a.siteId);
-  }, [user?.id, siteAssignments]);
+    const fromAssignments = siteAssignments.filter((a) => a.userId === user.id).map((a) => a.siteId);
+    if (user.role === 'assistant_supervisor') {
+      const fromSites = sites.filter((s) => s.assistantSupervisorId === user.id).map((s) => s.id);
+      return [...new Set([...fromAssignments, ...fromSites])];
+    }
+    return fromAssignments;
+  }, [user?.id, user?.role, siteAssignments, sites]);
+  const teamRoles = ['driver_truck', 'driver_machine', 'surveyor'];
+  const filteredWorkPhotos = useMemo(() => {
+    if (user?.role !== 'assistant_supervisor') return workPhotos;
+    return workPhotos.filter(
+      (p) =>
+        mySiteIds.includes(p.siteId) &&
+        teamRoles.includes(users.find((u) => u.id === p.uploadedBy)?.role ?? '')
+    );
+  }, [workPhotos, user?.role, mySiteIds, users]);
   const siteOptions = useMemo(() => {
     const list = user?.role === 'assistant_supervisor' || user?.role === 'surveyor'
       ? sites.filter((s) => mySiteIds.length === 0 || mySiteIds.includes(s.id))
@@ -288,7 +302,7 @@ export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
       {showGallery && (
         <View style={StyleSheet.absoluteFill}>
           <WorkProgressGalleryScreen
-            workPhotos={workPhotos}
+            workPhotos={filteredWorkPhotos}
             sites={sites}
             users={users}
             onBack={() => setShowGallery(false)}
@@ -325,7 +339,7 @@ function makeStyles(theme: ReturnType<typeof useResponsiveTheme>) {
     },
     scrollContent: {
       padding: theme.screenPadding,
-      paddingBottom: theme.spacingXl,
+      paddingBottom: theme.spacingXl + 56,
     },
     title: {
       fontSize: theme.fontSizeTitle,
