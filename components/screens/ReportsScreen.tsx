@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, Modal, Pressable, FlatList } from 'react-native';
 import {
   documentDirectory,
   cacheDirectory,
@@ -27,7 +27,17 @@ import {
   Download,
   Lock,
   Fuel,
+  ChevronDown,
 } from 'lucide-react-native';
+
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Format period "YYYY-MM" to "Mon YYYY" e.g. "Mar 2026" */
+function formatPeriodLabel(period: string): string {
+  const [y, m] = period.split('-').map(Number);
+  if (!y || !m) return period;
+  return `${MONTH_LABELS[m - 1]}-${y}`;
+}
 
 function getReportsSubtitle(role: string | undefined, t: (key: string) => string): string {
   if (role === 'accountant') return t('reports_subtitle_accountant');
@@ -162,6 +172,8 @@ export function ReportsScreen() {
   const theme = useResponsiveTheme();
   const { sites, vehicles, expenses, trips, machineSessions, surveys, reports, tasks, addReport, updateReport, refetch, loading } = useMockAppStore();
   const [selectedType, setSelectedType] = useState<'all' | 'financial' | 'operations' | 'site_performance'>('all');
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('');
+  const [monthDropdownVisible, setMonthDropdownVisible] = useState(false);
   const [reportPeriod, setReportPeriod] = useState<'this_month' | 'last_month'>('this_month');
   const [fuelSiteId, setFuelSiteId] = useState<string | null>(null);
   const [fuelVehicleType, setFuelVehicleType] = useState<'all' | 'truck' | 'machine'>('all');
@@ -198,9 +210,16 @@ export function ReportsScreen() {
   };
 
   const filteredReports = useMemo(() => {
-    if (selectedType === 'all') return reports;
-    return reports.filter((r) => r.type === selectedType);
-  }, [reports, selectedType]);
+    let list = selectedType === 'all' ? reports : reports.filter((r) => r.type === selectedType);
+    if (selectedMonthFilter) list = list.filter((r) => r.period === selectedMonthFilter);
+    return list;
+  }, [reports, selectedType, selectedMonthFilter]);
+
+  const monthOptions = useMemo(() => {
+    const periods = Array.from(new Set(reports.map((r) => r.period).filter(Boolean)) as Set<string>);
+    periods.sort((a, b) => b.localeCompare(a));
+    return [{ value: '', labelKey: 'reports_all_months' }, ...periods.map((p) => ({ value: p, labelKey: formatPeriodLabel(p) }))];
+  }, [reports]);
 
   const reportTypes: { id: 'all' | 'financial' | 'operations' | 'site_performance'; labelKey: string; Icon: React.ComponentType<{ size: number; color: string }> }[] = [
     { id: 'all', labelKey: 'reports_all', Icon: FileText },
@@ -457,24 +476,22 @@ export function ReportsScreen() {
       const dir = documentDirectory ?? cacheDirectory ?? '';
       const path = `${dir}${filename}`;
       await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
-      let canShare = false;
+      let shareShown = false;
       try {
-        // Optional: expo-sharing for Android save/share
         const Sharing = await import('expo-sharing');
-        canShare = await Sharing.isAvailableAsync();
-        if (canShare) {
+        if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(path, {
             mimeType: 'text/csv',
-            dialogTitle: t('reports_save_report'),
+            dialogTitle: t('reports_export_download_share'),
           });
+          shareShown = true;
         }
       } catch {
-        // expo-sharing not available (e.g. web or not installed)
+        // expo-sharing not available
       }
-      Alert.alert(
-        t('reports_exported'),
-        canShare ? t('reports_exported_share') : `${t('reports_exported_path')} ${path}`
-      );
+      if (!shareShown) {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
     } catch (e) {
       Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
     } finally {
@@ -596,11 +613,55 @@ export function ReportsScreen() {
           </View>
         )}
 
-        {/* Available Reports – at top; label varies by tab */}
+        {/* Available Reports – at top; label varies by tab; month dropdown on the right */}
         <View className="mb-4">
-          <Text className="text-lg font-bold text-gray-900 mb-3">
-            {selectedType === 'all' ? t('reports_available') : selectedType === 'financial' ? t('reports_saved_financial') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
-          </Text>
+          <View style={reportCardStyles.sectionHeaderRow}>
+            <Text style={reportCardStyles.sectionTitleText}>
+              {selectedType === 'all' ? t('reports_available') : selectedType === 'financial' ? t('reports_saved_financial') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
+            </Text>
+            <Pressable
+              onPress={() => setMonthDropdownVisible(true)}
+              style={reportCardStyles.monthDropdown}
+              accessibilityLabel={t('reports_month_filter')}
+              accessibilityRole="button"
+            >
+              <Text style={reportCardStyles.monthDropdownText}>
+                {selectedMonthFilter ? formatPeriodLabel(selectedMonthFilter) : t('reports_all_months')}
+              </Text>
+              <ChevronDown size={18} color={colors.primary} />
+            </Pressable>
+          </View>
+          <Modal
+            visible={monthDropdownVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setMonthDropdownVisible(false)}
+          >
+            <Pressable style={reportCardStyles.monthModalOverlay} onPress={() => setMonthDropdownVisible(false)}>
+              <View style={reportCardStyles.monthModalContent} onStartShouldSetResponder={() => true}>
+                <Text style={reportCardStyles.monthModalTitle}>{t('reports_month_filter')}</Text>
+                <FlatList
+                  data={monthOptions}
+                  keyExtractor={(item) => item.value || 'all'}
+                  renderItem={({ item }) => {
+                    const label = item.labelKey === 'reports_all_months' ? t('reports_all_months') : item.labelKey;
+                    const selected = item.value === selectedMonthFilter;
+                    return (
+                      <Pressable
+                        onPress={() => {
+                          setSelectedMonthFilter(item.value);
+                          setMonthDropdownVisible(false);
+                        }}
+                        style={[reportCardStyles.monthOption, selected && reportCardStyles.monthOptionSelected]}
+                      >
+                        <Text style={[reportCardStyles.monthOptionText, selected && reportCardStyles.monthOptionTextSelected]}>{label}</Text>
+                      </Pressable>
+                    );
+                  }}
+                />
+              </View>
+            </Pressable>
+          </Modal>
           {filteredReports.length === 0 ? (
             <EmptyState
               icon={<FileText size={32} color={colors.textMuted} />}
@@ -744,7 +805,7 @@ export function ReportsScreen() {
                     >
                       <Download size={16} color="#2563eb" />
                       <Text style={reportCardStyles.exportBtnText}>
-                        {exportingId === report.id ? t('reports_exporting') : t('reports_export_csv')}
+                        {exportingId === report.id ? t('reports_exporting') : t('reports_export_download_share_btn')}
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -1018,6 +1079,71 @@ export function ReportsScreen() {
 }
 
 const reportCardStyles = StyleSheet.create({
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sectionTitleText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1e293b',
+    flex: 1,
+    minWidth: 0,
+  },
+  monthDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  monthDropdownText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1d4ed8',
+  },
+  monthModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  monthModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    maxHeight: '70%',
+  },
+  monthModalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 12,
+  },
+  monthOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  monthOptionSelected: {
+    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+  },
+  monthOptionText: {
+    fontSize: 15,
+    color: '#334155',
+  },
+  monthOptionTextSelected: {
+    color: '#1d4ed8',
+    fontWeight: '600',
+  },
   card: {
     marginBottom: 16,
     overflow: 'hidden',

@@ -361,24 +361,40 @@ function useSupabaseStore(): MockAppStoreContextValue {
 
   useEffect(() => {
     if (!authUser) return;
+    const onRefetch = () => refetchDebounced();
     const channel = supabase
       .channel('app-store-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sites' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'machine_sessions' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'issues' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_assignments' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_vehicle_assignments' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'assigned_trips' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'operations' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'gps_photos' }, () => refetchDebounced())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => refetchDebounced())
+      // Event filtering: INSERT + UPDATE only (no DELETE) to reduce realtime traffic as tables grow
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sites' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sites' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'vehicles' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'vehicles' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'expenses' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'expenses' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trips' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trips' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'machine_sessions' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'machine_sessions' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'surveys' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'surveys' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'issues' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'issues' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'site_assignments' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'site_assignments' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'driver_vehicle_assignments' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_vehicle_assignments' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assigned_trips' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'assigned_trips' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'operations' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'operations' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'reports' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'reports' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, onRefetch)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'gps_photos' }, onRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'gps_photos' }, onRefetch)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
@@ -393,15 +409,17 @@ function useSupabaseStore(): MockAppStoreContextValue {
           };
         }) => {
           const record = payload?.new;
-          if (!record?.title || !record?.body) return;
-          const role = currentUserRoleRef.current;
-          if (role && record.target_role === role) {
-            showSystemNotificationWithData(String(record.title), String(record.body), {
-              linkId: record.link_id,
-              linkType: record.link_type,
-              notificationId: record.id,
-            });
+          if (record?.title && record?.body) {
+            const role = currentUserRoleRef.current;
+            if (role && record.target_role === role) {
+              showSystemNotificationWithData(String(record.title), String(record.body), {
+                linkId: record.link_id,
+                linkType: record.link_type,
+                notificationId: record.id,
+              });
+            }
           }
+          onRefetch();
         }
       )
       .subscribe();
