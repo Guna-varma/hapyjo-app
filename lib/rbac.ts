@@ -26,8 +26,23 @@ export function canAccessTab(role: UserRole, tabId: TabId): boolean {
   return TAB_ACCESS[tabId].includes(role);
 }
 
+/** Owner footer order: Dashboard, Reports, Vehicles, Surveys, Issues, Work Progress Gallery (gps_camera), Users, Settings */
+const OWNER_TAB_ORDER: TabId[] = ['dashboard', 'reports', 'vehicles', 'surveys', 'issues', 'gps_camera', 'users', 'settings'];
+
+/** Head Supervisor: same as owner with Sites; Users last-but-one, Settings last */
+const HEAD_SUPERVISOR_TAB_ORDER: TabId[] = ['dashboard', 'reports', 'sites', 'vehicles', 'surveys', 'issues', 'gps_camera', 'users', 'settings'];
+
+const DEFAULT_TAB_ORDER = (Object.keys(TAB_ACCESS) as TabId[]);
+
 export function getTabsForRole(role: UserRole): TabId[] {
-  return (Object.keys(TAB_ACCESS) as TabId[]).filter((tabId) => canAccessTab(role, tabId));
+  const accessible = (Object.keys(TAB_ACCESS) as TabId[]).filter((tabId) => canAccessTab(role, tabId));
+  if (role === 'owner') {
+    return OWNER_TAB_ORDER.filter((id) => accessible.includes(id));
+  }
+  if (role === 'head_supervisor') {
+    return HEAD_SUPERVISOR_TAB_ORDER.filter((id) => accessible.includes(id));
+  }
+  return DEFAULT_TAB_ORDER.filter((id) => accessible.includes(id));
 }
 
 export function canCreateUser(role: UserRole): boolean {

@@ -117,7 +117,11 @@ export function AppNavigation() {
     }
   }, [tabIdsKey, activeTab, tabIds]);
 
-  const visibleTabs = tabIds.map((id) => ({ id, ...TAB_CONFIG[id], label: t(TAB_CONFIG[id].labelKey) }));
+  const visibleTabs = tabIds.map((id) => {
+    const config = TAB_CONFIG[id];
+    const labelKey = user?.role === 'owner' && id === 'gps_camera' ? 'tab_work_progress_gallery' : config.labelKey;
+    return { id, ...config, label: t(labelKey) };
+  });
 
   const renderContent = () => {
     switch (activeTab) {
