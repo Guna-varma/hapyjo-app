@@ -97,6 +97,23 @@ export interface Task {
   photos?: string[];
 }
 
+export type SiteTaskStatus = 'not_started' | 'started' | 'in_progress' | 'completed';
+
+/** Weighted task used to calculate a site's overall progress. */
+export interface SiteTask {
+  id: string;
+  siteId: string;
+  taskName: string;
+  /** Weight percentage (1..100). Sum of a site's weights should equal 100. */
+  weight: number;
+  status: SiteTaskStatus;
+  /** Integer percent: 0..100. (0 only allowed when status = not_started; completed forces 100.) */
+  progress: number;
+  notes?: string | null;
+  updatedBy?: string | null;
+  updatedAt: string;
+}
+
 export interface Survey {
   id: string;
   type: string;
@@ -187,15 +204,47 @@ export interface MachineSession {
   createdAt: string;
 }
 
+/** Status for assigned trips (trucks: TRIP_*, machines: TASK_*). See lib/tripLifecycle. */
+export type AssignedTripStatus =
+  | 'TRIP_ASSIGNED' | 'TRIP_PENDING' | 'TRIP_STARTED' | 'TRIP_PAUSED' | 'TRIP_RESUMED' | 'TRIP_IN_PROGRESS' | 'TRIP_NEED_APPROVAL' | 'TRIP_COMPLETED'
+  | 'TASK_ASSIGNED' | 'TASK_PENDING' | 'TASK_STARTED' | 'TASK_PAUSED' | 'TASK_RESUMED' | 'TASK_IN_PROGRESS' | 'TASK_NEED_APPROVAL' | 'TASK_COMPLETED';
+
+/** Assigned trip (truck) or task (machine) with lifecycle status. */
+export interface AssignedTrip {
+  id: string;
+  siteId: string;
+  vehicleId: string;
+  driverId: string;
+  vehicleType: 'truck' | 'machine';
+  taskType?: string | null;
+  status: AssignedTripStatus;
+  notes?: string | null;
+  createdBy: string;
+  createdAt: string;
+  startedAt?: string | null;
+  pausedAt?: string | null;
+  resumedAt?: string | null;
+  /** Array of { startedAt, endedAt } for each pause segment (for duration calc). */
+  pauseSegments?: { startedAt: string; endedAt: string }[];
+  completedAt?: string | null;
+  completedBy?: string | null;
+}
+
 export interface Issue {
   id: string;
   siteId: string;
   siteName?: string;
   raisedById: string;
+  /** Role of the creator (assistant_supervisor, driver_truck, driver_machine). */
+  createdByRole?: string;
   description: string;
+  /** Storage paths in bucket issue-images (e.g. issue/<issueId>/file.jpg). Deleted when issue is resolved. */
   imageUris: string[];
   status: 'open' | 'acknowledged' | 'resolved';
   createdAt: string;
+  /** Set when status = resolved. */
+  resolvedBy?: string;
+  resolvedAt?: string;
 }
 
 export interface SiteAssignment {
@@ -233,6 +282,21 @@ export interface Report {
   generatedDate: string;
   period: string;
   data: any;
+}
+
+export interface WorkPhoto {
+  id: string;
+  photoUrl: string;
+  thumbnailUrl: string;
+  latitude: number;
+  longitude: number;
+  siteId: string;
+  siteName?: string;
+  projectId?: string;
+  uploadedBy: string;
+  uploadedByName?: string;
+  userRole: string;
+  createdAt: string;
 }
 
 export interface Notification {

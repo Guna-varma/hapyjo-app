@@ -18,7 +18,7 @@ const TAB_ACCESS: Record<TabId, UserRole[]> = {
   expenses: ['assistant_supervisor'],
   surveys: ['admin', 'owner', 'head_supervisor', 'assistant_supervisor', 'surveyor'],
   issues: ['owner', 'head_supervisor', 'assistant_supervisor', 'driver_truck', 'driver_machine'],
-  gps_camera: ['driver_truck', 'driver_machine', 'assistant_supervisor'],
+  gps_camera: ['owner', 'head_supervisor', 'assistant_supervisor', 'surveyor'],
   settings: ['admin', 'owner', 'head_supervisor', 'accountant', 'assistant_supervisor', 'surveyor', 'driver_truck', 'driver_machine'],
 };
 

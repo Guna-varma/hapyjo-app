@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, ActivityIndicator, useWindowDimensions, Platform } from 'react-native';
+import * as Location from 'expo-location';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { MockAppStoreProvider } from '@/context/MockAppStoreContext';
 import { ToastProvider } from '@/context/ToastContext';
@@ -10,6 +11,29 @@ import { AppNavigation } from '@/components/navigation/AppNavigation';
 import { PushTokenRegistration } from '@/components/PushTokenRegistration';
 import { requestNotificationPermissionAsync } from '@/lib/registerPushToken';
 import '../global.css';
+
+/** Requests location permission when the app opens so it can be granted upfront (e.g. for GPS, driver tracking, issue reporting). */
+function RequestLocationPermissionOnAppOpen() {
+  const requested = useRef(false);
+  useEffect(() => {
+    if (requested.current) return;
+    requested.current = true;
+    const run = async () => {
+      try {
+        if (Platform.OS === 'web') return;
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          await Location.requestForegroundPermissionsAsync();
+        }
+      } catch {
+        /* ignore; permission may be requested later on relevant screens */
+      }
+    };
+    const t = setTimeout(run, 800);
+    return () => clearTimeout(t);
+  }, []);
+  return null;
+}
 
 /** Asks for notification permission when on login screen so Android Expo Go and APK show the system prompt. */
 function RequestNotificationPermissionOnLoginScreen() {
@@ -80,6 +104,7 @@ export default function HomeScreen() {
       <LocaleProvider>
         <MockAppStoreProvider>
           <ToastProvider>
+            <RequestLocationPermissionOnAppOpen />
             <View style={{ flex: 1 }}>
               <AppContent />
             </View>

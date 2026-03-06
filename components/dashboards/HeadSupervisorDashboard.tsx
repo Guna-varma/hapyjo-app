@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { SiteCard } from '@/components/sites/SiteCard';
@@ -10,11 +10,13 @@ import { formatAmount } from '@/lib/currency';
 import { colors, layout } from '@/theme/tokens';
 import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck } from 'lucide-react-native';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
+import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 
 /** Head Supervisor allocates vehicles to sites (Vehicles tab). Driver/operator assignment is done by Assistant Supervisor only. */
 export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { t } = useLocale();
   const { sites, surveys } = useMockAppStore();
+  const [tasksSiteId, setTasksSiteId] = useState<string | null>(null);
   const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
   const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
   const activeSites = sites.filter((s) => s.status === 'active').length;
@@ -32,6 +34,18 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
     { icon: <MapPin size={24} color="#8B5CF6" />, label: t('dashboard_spent'), value: formatAmount(totalSpent, true), bg: 'bg-purple-50' },
     { icon: <TrendingUp size={24} color="#059669" />, label: t('dashboard_profit'), value: formatAmount(profit, true), bg: profit >= 0 ? 'bg-emerald-50' : 'bg-red-50' },
   ];
+
+  const selectedSite = tasksSiteId ? sites.find((s) => s.id === tasksSiteId) ?? null : null;
+
+  if (selectedSite) {
+    return (
+      <SiteTasksScreen
+        initialSiteId={selectedSite.id}
+        readOnly
+        onBack={() => setTasksSiteId(null)}
+      />
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -52,10 +66,6 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
               <TouchableOpacity onPress={() => onNavigateTab('reports')} style={hsStyles.quickBtn}>
                 <FileText size={18} color="#2563eb" />
                 <Text style={hsStyles.quickBtnText}>{t('dashboard_generate_report')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => onNavigateTab('tasks')} style={hsStyles.quickBtn}>
-                <ClipboardCheck size={18} color="#7c3aed" />
-                <Text style={hsStyles.quickBtnText}>{t('tab_tasks')}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => onNavigateTab('surveys')} style={hsStyles.quickBtn}>
                 <MapPin size={18} color="#b45309" />
@@ -83,7 +93,7 @@ export function HeadSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {
           <View style={hsStyles.section}>
             <Text style={hsStyles.sectionTitle}>{t('dashboard_site_locations')}</Text>
             {sites.map((site) => (
-              <SiteCard key={site.id} site={site} />
+              <SiteCard key={site.id} site={site} onPress={() => setTasksSiteId(site.id)} />
             ))}
           </View>
         )}
@@ -105,5 +115,11 @@ const hsStyles = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: '700', color: colors.text, marginTop: 8 },
   statLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   section: { marginBottom: layout.cardSpacingVertical },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: layout.grid },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: layout.grid,
+    letterSpacing: 0.4,
+  },
 });

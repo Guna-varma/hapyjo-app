@@ -24,7 +24,7 @@ export function DashboardLayout({ children, scroll = true, ...scrollProps }: Das
       <ScrollView
         style={styles.fill}
         contentContainerStyle={contentStyle}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         showsVerticalScrollIndicator={false}
         {...scrollProps}
       >

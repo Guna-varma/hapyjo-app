@@ -17,6 +17,30 @@ interface SiteCardProps {
 export function SiteCard({ site, onPress }: SiteCardProps) {
   const { t } = useLocale();
   const budgetUtilization = site.budget && site.budget > 0 ? (site.spent / site.budget) * 100 : 0;
+  const progressPct = Math.round(site.progress ?? 0);
+
+  let remainingLabel: string | null = null;
+  let remainingStyle: { color: string; fontWeight?: '600'; } | null = null;
+  if (site.status !== 'completed' && site.expectedEndDate) {
+    const end = new Date(site.expectedEndDate.slice(0, 10));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((end.getTime() - today.getTime()) / 86400000);
+    if (diffDays > 5) {
+      remainingLabel = `${diffDays} ${t('dashboard_remaining_days').toLowerCase()}`;
+      remainingStyle = { color: '#64748b' };
+    } else if (diffDays > 0) {
+      remainingLabel = `${diffDays} ${t('dashboard_remaining_days').toLowerCase()}`;
+      remainingStyle = { color: '#b91c1c', fontWeight: '600' };
+    } else if (diffDays === 0) {
+      remainingLabel = t('dashboard_overdue');
+      remainingStyle = { color: '#b91c1c', fontWeight: '600' };
+    } else if (diffDays < 0) {
+      remainingLabel = t('dashboard_overdue');
+      remainingStyle = { color: '#b91c1c', fontWeight: '600' };
+    }
+  }
 
   const statusVariant = {
     active: 'success' as const,
@@ -52,14 +76,24 @@ export function SiteCard({ site, onPress }: SiteCardProps) {
               {site.expectedEndDate ? formatDateLabel(site.expectedEndDate.slice(0, 10)) : '—'}
             </Text>
           </View>
+          {remainingLabel && remainingStyle && (
+            <View className="ml-auto px-2 py-1 rounded-full bg-red-50">
+              <Text
+                className="text-xs"
+                style={remainingStyle}
+              >
+                {remainingLabel}
+              </Text>
+            </View>
+          )}
         </View>
 
         <View className="mb-3">
           <View className="flex-row justify-between mb-1">
             <Text className="text-xs text-gray-600">{t('site_card_progress')}</Text>
-            <Text className="text-xs font-semibold text-gray-900">{site.progress}%</Text>
+            <Text className="text-xs font-semibold text-gray-900">{progressPct}%</Text>
           </View>
-          <ProgressBar progress={site.progress} showLabel={false} />
+          <ProgressBar progress={progressPct} showLabel={false} />
         </View>
 
         <View className="flex-row justify-between">

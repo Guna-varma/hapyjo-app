@@ -28,6 +28,7 @@ The flow below uses “site” and “project” interchangeably.
 | **7. Day-to-day work** | Drivers: start/end trips (trucks) or work sessions (machines); record fuel, distance/hours. Assistant Supervisor: add expenses (general, fuel); manage tasks; approve surveys. Surveyor: submit before/after surveys (volume in m³). | **Driver (truck)**, **Operator (machine)**, **Assistant Supervisor**, **Surveyor** |
 | **8. Survey → volume → revenue** | Surveyor submits survey (e.g. CSV); app computes work volume (m³). Assistant Supervisor **approves** survey. Approved volume × site contract rate = **revenue** for that site. | **Surveyor** (submit), **Assistant Supervisor** (approve) |
 | **9. Costs and reporting** | Expenses (fuel, general) update site **spent**. Accountant and Owner see **per-site** and **total** budget, spent, revenue, profit. | **Assistant Supervisor** (expenses); **Accountant** / **Owner** (view reports) |
+| **9b. Site progress** | **Site progress** (0–100%) is the physical/work completion percentage for the site. It is **updated by the Assistant Supervisor** for their assigned site(s). Head Supervisor sees it on the **Head Supervisor dashboard** (Site and budget overview) and in **Reports**. | **Assistant Supervisor** (update progress on Dashboard → “Update progress” for their site); **Head Supervisor** / **Owner** (view only on dashboard and reports; Admin/Head Supervisor can override via site edit if needed) |
 | **10. Issues** | Drivers, operators, or Assistant Supervisor raise issues (e.g. breakdown, safety). Head Supervisor and Owner see and handle them. | **Driver**, **Operator**, **Assistant Supervisor** (raise); **Head Supervisor**, **Owner** (view/resolve) |
 | **11. Project/site end** | When work is done, site status can be set to **completed** (or inactive). Financial summary remains available for reporting. | **Admin** / **Head Supervisor** (update site status when applicable) |
 
@@ -71,6 +72,7 @@ The flow below uses “site” and “project” interchangeably.
 - **Assigns drivers and operators to vehicles** at each site (only role that can do this in the app).
 - Sees only **their assigned site(s)**.
 - **Adds expenses** (general and fuel) for the site; site “spent” updates.
+- **Updates site progress** (0–100%) for their assigned site from the **Dashboard** (“Update progress”). This is the single source of progress that the Head Supervisor sees on the Head Supervisor dashboard and in Reports. Logic: the Assistant Supervisor enters the current completion percentage based on on-site assessment; they can update it whenever work advances. **How to know if progress is correct:** Head Supervisor (and Owner) see the same progress on the dashboard and in Reports; they can cross-check with spent/budget and site status. If needed, Admin or Head Supervisor can override by editing the site (e.g. from Sites tab) and setting a different progress value.
 - **Approves surveys** submitted by the Surveyor (submitted → approved); approved surveys feed revenue (volume × contract rate).
 - Manages **tasks** at the site; raises **issues**; can use **GPS/Camera** (e.g. for proof of work).
 
@@ -149,9 +151,9 @@ The app already supports both: **process/site level** for operations (each site 
 |------|-------------|-------------------|------------------------------|------------------------|----------------------------------|--------------|-----------------|----------------|----------------|-------------|----------------------|
 | Admin | ✓ | — | ✓ | ✓ (via site detail) | — | — | — | — | — | — | ✓ |
 | Owner | — | ✓ | — | — | — | — | — | — | — | View | ✓ |
-| Head Supervisor | ✓ | — | ✓ | ✓ | — | — | — | — | — | View | ✓ |
+| Head Supervisor | ✓ | — | ✓ | ✓ | — | — | — | — | — | View | ✓ (sees progress) |
+| Assistant Supervisor | — | — | — | — | ✓ | ✓ | ✓ | — | — | ✓ | Updates site progress (Dashboard) |
 | Accountant | — | — | — | — | — | — | — | — | — | — | ✓ (read-only) |
-| Assistant Supervisor | — | — | — | — | ✓ | ✓ | ✓ | — | — | ✓ | — |
 | Surveyor | — | — | — | — | — | — | — | ✓ | — | — | — |
 | Driver (truck) | — | — | — | — | — | — | — | — | ✓ (trips) | ✓ | — |
 | Operator (machine) | — | — | — | — | — | — | — | — | ✓ (sessions) | ✓ | — |

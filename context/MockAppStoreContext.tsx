@@ -7,10 +7,13 @@ import type {
   MachineSession,
   Survey,
   Issue,
+  WorkPhoto,
   SiteAssignment,
   User,
   DriverVehicleAssignment,
+  AssignedTrip,
   Task,
+  SiteTask,
   Operation,
   Report,
   Notification,
@@ -25,6 +28,8 @@ import {
   machineSessionFromRow,
   surveyFromRow,
   issueFromRow,
+  workPhotoFromRow,
+  workPhotoToRow,
   siteAssignmentFromRow,
   driverVehicleAssignmentFromRow,
   taskFromRow,
@@ -42,9 +47,13 @@ import {
   surveyToRow,
   issueToRow,
   taskToRow,
+  siteTaskFromRow,
+  siteTaskToRow,
   reportToRow,
   profileToRow,
   notificationToRow,
+  assignedTripFromRow,
+  assignedTripToRow,
 } from '@/lib/supabaseMappers';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -54,8 +63,10 @@ import {
   type QueuedItem,
 } from '@/lib/offlineQueue';
 import { generateId } from '@/lib/id';
-import { buildNotificationRows, buildNotificationRowForUser } from '@/lib/notificationScenarios';
+import { buildNotificationRows, buildNotificationRowForUser, getScenario } from '@/lib/notificationScenarios';
 import { showSystemNotificationWithData } from '@/lib/localNotifications';
+import { deleteIssueImagesFromStorage } from '@/lib/issueImageStorage';
+import { canTransition, getTripTransitionRole } from '@/lib/tripLifecycle';
 
 export interface MockAppStoreState {
   sites: Site[];
@@ -65,12 +76,15 @@ export interface MockAppStoreState {
   machineSessions: MachineSession[];
   surveys: Survey[];
   issues: Issue[];
+  workPhotos: WorkPhoto[];
   siteAssignments: SiteAssignment[];
   users: User[];
   driverVehicleAssignments: DriverVehicleAssignment[];
+  assignedTrips: AssignedTrip[];
   budgetAllocations: BudgetAllocation[];
   contractRateRwf: number;
   tasks: Task[];
+  siteTasks: SiteTask[];
   operations: Operation[];
   reports: Report[];
   notifications: Notification[];
@@ -95,6 +109,7 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   setMachineSessions: SetMachineSessions;
   setSurveys: SetSurveys;
   setIssues: SetIssues;
+  setWorkPhotos: (w: WorkPhoto[] | ((prev: WorkPhoto[]) => WorkPhoto[])) => void;
   setSiteAssignments: SetSiteAssignments;
   setContractRateRwf: SetContractRateRwf;
 
@@ -111,6 +126,7 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   updateSurvey: (id: string, patch: Partial<Survey>) => Promise<void>;
   addIssue: (issue: Issue) => Promise<void>;
   updateIssue: (id: string, patch: Partial<Issue>) => Promise<void>;
+  addWorkPhoto: (photo: Omit<WorkPhoto, 'id' | 'createdAt' | 'siteName' | 'uploadedByName'>) => Promise<WorkPhoto>;
   setSiteAssignment: (siteId: string, assignment: Partial<SiteAssignment> & { role: string }) => Promise<void>;
   removeSiteAssignment: (siteId: string, userId: string) => Promise<void>;
   addUser: (user: User) => Promise<void>;
@@ -129,7 +145,10 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   addSite: (site: Site) => Promise<void>;
   addBudgetAllocation: (siteId: string, amountRwf: number, allocatedById?: string) => Promise<void>;
   setDriverVehicleAssignment: (siteId: string, driverId: string, vehicleIds: string[]) => Promise<void>;
+  addAssignedTrip: (trip: AssignedTrip) => Promise<void>;
+  updateAssignedTripStatus: (id: string, toStatus: AssignedTrip['status']) => Promise<void>;
   updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
+  updateSiteTask: (id: string, patch: Partial<SiteTask>) => Promise<void>;
   addReport: (report: Report) => Promise<void>;
   updateReport: (id: string, patch: Partial<Report>) => Promise<void>;
   notifications: Notification[];
@@ -149,12 +168,15 @@ const emptyState: MockAppStoreState = {
   machineSessions: [],
   surveys: [],
   issues: [],
+  workPhotos: [],
   siteAssignments: [],
   users: [],
   driverVehicleAssignments: [],
+  assignedTrips: [],
   budgetAllocations: [],
   contractRateRwf: defaultContractRate,
   tasks: [],
+  siteTasks: [],
   operations: [],
   reports: [],
   notifications: [],
@@ -194,7 +216,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       }
       await saveOfflineQueue(remaining);
 
-      const [sitesRes, vehiclesRes, expensesRes, tripsRes, machineSessionsRes, surveysRes, issuesRes, siteAssignmentsRes, driverVehicleAssignmentsRes, tasksRes, operationsRes, reportsRes, profilesRes] = await Promise.all([
+      const [sitesRes, vehiclesRes, expensesRes, tripsRes, machineSessionsRes, surveysRes, issuesRes, workPhotosRes, siteAssignmentsRes, driverVehicleAssignmentsRes, tasksRes, siteTasksRes, operationsRes, reportsRes, profilesRes, budgetAllocationsRes] = await Promise.all([
         supabase.from('sites').select('*'),
         supabase.from('vehicles').select('*'),
         supabase.from('expenses').select('*'),
@@ -202,20 +224,23 @@ function useSupabaseStore(): MockAppStoreContextValue {
         supabase.from('machine_sessions').select('*'),
         supabase.from('surveys').select('*'),
         supabase.from('issues').select('*'),
+        supabase.from('work_photos').select('*').order('created_at', { ascending: false }),
         supabase.from('site_assignments').select('*'),
         supabase.from('driver_vehicle_assignments').select('*'),
         supabase.from('tasks').select('*'),
+        supabase.from('site_tasks').select('*').order('task_name', { ascending: true }),
         supabase.from('operations').select('*'),
         supabase.from('reports').select('*'),
         supabase.from('profiles').select('*'),
+        supabase.from('site_budget_allocations').select('*').order('allocated_at', { ascending: true }),
       ]);
 
       let budgetAllocations: BudgetAllocation[] = [];
-      const budgetAllocationsRes = await supabase.from('site_budget_allocations').select('*').order('allocated_at', { ascending: true });
       if (!budgetAllocationsRes.error) {
         budgetAllocations = (budgetAllocationsRes.data ?? []).map((r) => budgetAllocationFromRow(r as Record<string, unknown>));
       }
-      // If table does not exist (migration 20250305100000 not run), budgetAllocations stays []
+
+      let assignedTrips: AssignedTrip[] = [];
 
       const sites = (sitesRes.data ?? []).map((r) => siteFromRow(r as Record<string, unknown>));
       const vehicles = (vehiclesRes.data ?? []).map((r) => vehicleFromRow(r as Record<string, unknown>));
@@ -224,9 +249,11 @@ function useSupabaseStore(): MockAppStoreContextValue {
       const machineSessions = (machineSessionsRes.data ?? []).map((r) => machineSessionFromRow(r as Record<string, unknown>));
       const surveys = (surveysRes.data ?? []).map((r) => surveyFromRow(r as Record<string, unknown>));
       const issues = (issuesRes.data ?? []).map((r) => issueFromRow(r as Record<string, unknown>));
+      const workPhotos = (workPhotosRes.data ?? []).map((r) => workPhotoFromRow(r as Record<string, unknown>));
       const siteAssignments = (siteAssignmentsRes.data ?? []).map((r) => siteAssignmentFromRow(r as Record<string, unknown>));
       const driverVehicleAssignments = (driverVehicleAssignmentsRes.data ?? []).map((r) => driverVehicleAssignmentFromRow(r as Record<string, unknown>));
       const tasks = (tasksRes.data ?? []).map((r) => taskFromRow(r as Record<string, unknown>));
+      const siteTasks = (siteTasksRes.data ?? []).map((r) => siteTaskFromRow(r as Record<string, unknown>));
       const operations = (operationsRes.data ?? []).map((r) => operationFromRow(r as Record<string, unknown>));
       const reports = (reportsRes.data ?? []).map((r) => reportFromRow(r as Record<string, unknown>));
       // Include all profiles so Assistant Supervisor can see full team info
@@ -268,16 +295,35 @@ function useSupabaseStore(): MockAppStoreContextValue {
         machineSessions,
         surveys,
         issues,
+        workPhotos,
         siteAssignments,
         users,
         driverVehicleAssignments,
+        assignedTrips,
         budgetAllocations,
         contractRateRwf,
         tasks,
+        siteTasks,
         operations,
         reports,
         notifications,
       });
+
+      // Load assigned_trips in background (lightweight, non-blocking) so the app stays responsive
+      void supabase
+        .from('assigned_trips')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(150)
+        .then(
+          (assignedTripsRes) => {
+            if (!assignedTripsRes.error && assignedTripsRes.data) {
+              const loaded = (assignedTripsRes.data as Record<string, unknown>[]).map((r) => assignedTripFromRow(r));
+              setState((prev) => ({ ...prev, assignedTrips: loaded }));
+            }
+          },
+          () => { /* table may not exist or RLS; keep assignedTrips as [] */ }
+        );
     } catch {
       // keep previous state on error
     } finally {
@@ -308,6 +354,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'issues' }, () => refetch())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'site_assignments' }, () => refetch())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_vehicle_assignments' }, () => refetch())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assigned_trips' }, () => refetch())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => refetch())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'operations' }, () => refetch())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => refetch())
@@ -367,6 +414,9 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, []);
   const setIssues = useCallback((arg: Issue[] | ((prev: Issue[]) => Issue[])) => {
     setState((prev) => ({ ...prev, issues: typeof arg === 'function' ? arg(prev.issues) : arg }));
+  }, []);
+  const setWorkPhotos = useCallback((arg: WorkPhoto[] | ((prev: WorkPhoto[]) => WorkPhoto[])) => {
+    setState((prev) => ({ ...prev, workPhotos: typeof arg === 'function' ? arg(prev.workPhotos) : arg }));
   }, []);
   const setSiteAssignments = useCallback((arg: SiteAssignment[] | ((prev: SiteAssignment[]) => SiteAssignment[])) => {
     setState((prev) => ({ ...prev, siteAssignments: typeof arg === 'function' ? arg(prev.siteAssignments) : arg }));
@@ -628,21 +678,43 @@ function useSupabaseStore(): MockAppStoreContextValue {
   }, [refetch, state.surveys, state.sites]);
 
   const addIssue = useCallback(async (issue: Issue) => {
-    const row = issueToRow(issue);
+    const role = state.users.find((u) => u.id === authUser?.id)?.role;
+    const allowedRoles = ['assistant_supervisor', 'driver_truck', 'driver_machine'];
+    if (!role || !allowedRoles.includes(role)) {
+      throw new Error('Only Assistant Supervisor, Driver, or Operator can create issues.');
+    }
+    const issueWithRole: Issue = {
+      ...issue,
+      status: 'open',
+      createdByRole: role,
+    };
+    const row = issueToRow(issueWithRole);
     const { error } = await supabase.from('issues').insert(row);
     if (error) throw error;
     const siteName = state.sites.find((s) => s.id === issue.siteId)?.name;
-    const rows = buildNotificationRows('issue_raised', { ...issue, siteName }, () => generateId('n'));
+    const rows = buildNotificationRows('issue_raised', { ...issueWithRole, siteName }, () => generateId('n'));
     for (const r of rows) {
       await supabase.from('notifications').insert(r);
     }
     await refetch();
-  }, [refetch, state.sites]);
+  }, [refetch, state.sites, state.users, authUser?.id]);
 
   const updateIssue = useCallback(async (id: string, patch: Partial<Issue>) => {
-    const payload = { ...patch };
+    const role = state.users.find((u) => u.id === authUser?.id)?.role;
+    if (patch.status === 'resolved') {
+      if (role !== 'head_supervisor' && role !== 'owner') {
+        throw new Error('Only Head Supervisor or Owner can resolve issues.');
+      }
+      const issue = state.issues.find((i) => i.id === id);
+      if (issue?.imageUris?.length) {
+        await deleteIssueImagesFromStorage(issue.imageUris);
+      }
+    }
+    const payload: Partial<Issue> = { ...patch };
     if (patch.status === 'resolved') {
       payload.imageUris = [];
+      payload.resolvedBy = authUser?.id ?? undefined;
+      payload.resolvedAt = new Date().toISOString();
     }
     const row = issueToRow(payload);
     if (Object.keys(row).length === 0) return;
@@ -657,7 +729,18 @@ function useSupabaseStore(): MockAppStoreContextValue {
       }
     }
     await refetch();
-  }, [refetch, state.issues, state.sites]);
+  }, [refetch, state.issues, state.sites, state.users, authUser?.id]);
+
+  const addWorkPhoto = useCallback(
+    async (photo: Omit<WorkPhoto, 'id' | 'createdAt' | 'siteName' | 'uploadedByName'>) => {
+      const row = workPhotoToRow(photo);
+      const { data, error } = await supabase.from('work_photos').insert(row).select().single();
+      if (error) throw error;
+      await refetch();
+      return workPhotoFromRow((data ?? photo) as Record<string, unknown>);
+    },
+    [refetch]
+  );
 
   const setSiteAssignment = useCallback(async (siteId: string, assignment: Partial<SiteAssignment> & { role: string }) => {
     const userId = assignment.userId ?? '';
@@ -740,8 +823,11 @@ function useSupabaseStore(): MockAppStoreContextValue {
     if (Object.keys(row).length === 0) return;
     const { error } = await supabase.from('profiles').update(row).eq('id', id);
     if (error) throw error;
-    await refetch();
-  }, [refetch]);
+    setState((prev) => ({
+      ...prev,
+      users: prev.users.map((u) => (u.id === id ? { ...u, ...patch } : u)),
+    }));
+  }, []);
 
   const setDriverVehicleAssignment = useCallback(async (siteId: string, driverId: string, vehicleIds: string[]) => {
     const row = { site_id: siteId, driver_id: driverId, vehicle_ids: vehicleIds };
@@ -772,6 +858,81 @@ function useSupabaseStore(): MockAppStoreContextValue {
     await refetch();
   }, [refetch, state.sites, state.users, state.vehicles]);
 
+  const addAssignedTrip = useCallback(async (trip: AssignedTrip) => {
+    const row = assignedTripToRow(trip);
+    const { error } = await supabase.from('assigned_trips').insert(row);
+    if (error) throw error;
+    const siteName = state.sites.find((s) => s.id === trip.siteId)?.name;
+    const vehicleNumberOrId = state.vehicles.find((v) => v.id === trip.vehicleId)?.vehicleNumberOrId;
+    const scenario = getScenario('trip_assigned');
+    const title = scenario.getTitle({ ...trip, siteName, vehicleNumberOrId, vehicleType: trip.vehicleType });
+    const body = scenario.getBody({ ...trip, siteName, vehicleNumberOrId, vehicleType: trip.vehicleType });
+    const driver = state.users.find((u) => u.id === trip.driverId);
+    const targetRole = trip.vehicleType === 'truck' ? 'driver_truck' : 'driver_machine';
+    const personalRow = buildNotificationRowForUser(
+      targetRole,
+      trip.driverId,
+      title,
+      body,
+      () => generateId('n'),
+      trip.id,
+      'assigned_trip'
+    );
+    await supabase.from('notifications').insert(personalRow);
+    await refetch();
+  }, [refetch, state.sites, state.users, state.vehicles]);
+
+  const updateAssignedTripStatus = useCallback(async (id: string, toStatus: AssignedTrip['status']) => {
+    const current = state.assignedTrips.find((t) => t.id === id);
+    if (!current) throw new Error('Assigned trip not found.');
+    const currentUser = state.users.find((u) => u.id === authUser?.id);
+    const role = currentUser ? getTripTransitionRole(currentUser.role) : null;
+    if (role == null) throw new Error('You are not allowed to change this trip status.');
+    if (!canTransition(current.status, toStatus, role)) {
+      const { getTransitionErrorMessage } = await import('@/lib/tripLifecycle');
+      throw new Error(getTransitionErrorMessage(current.status, toStatus, role));
+    }
+    const patch: Partial<AssignedTrip> = { status: toStatus };
+    const now = new Date().toISOString();
+    if (toStatus === 'TRIP_STARTED' || toStatus === 'TASK_STARTED') patch.startedAt = now;
+    if (toStatus === 'TRIP_PAUSED' || toStatus === 'TASK_PAUSED') patch.pausedAt = now;
+    if (toStatus === 'TRIP_RESUMED' || toStatus === 'TASK_RESUMED') patch.resumedAt = now;
+    if (toStatus === 'TRIP_NEED_APPROVAL' || toStatus === 'TASK_NEED_APPROVAL') {
+      // no extra fields
+    }
+    if (toStatus === 'TRIP_COMPLETED' || toStatus === 'TASK_COMPLETED') {
+      patch.completedAt = now;
+      patch.completedBy = authUser?.id ?? undefined;
+    }
+    const row = assignedTripToRow(patch);
+    delete (row as Record<string, unknown>).id;
+    delete (row as Record<string, unknown>).site_id;
+    delete (row as Record<string, unknown>).vehicle_id;
+    delete (row as Record<string, unknown>).driver_id;
+    delete (row as Record<string, unknown>).created_by;
+    delete (row as Record<string, unknown>).created_at;
+    const { error } = await supabase.from('assigned_trips').update(row).eq('id', id);
+    if (error) throw error;
+    if (toStatus === 'TRIP_NEED_APPROVAL' || toStatus === 'TASK_NEED_APPROVAL') {
+      const site = state.sites.find((s) => s.id === current.siteId);
+      const asId = site?.assistantSupervisorId;
+      const siteName = site?.name;
+      const vehicleNumberOrId = state.vehicles.find((v) => v.id === current.vehicleId)?.vehicleNumberOrId;
+      const driverName = state.users.find((u) => u.id === current.driverId)?.name;
+      const scenario = getScenario('trip_need_approval');
+      const title = scenario.getTitle({ ...current, siteName, vehicleNumberOrId, driverName, vehicleType: current.vehicleType });
+      const body = scenario.getBody({ ...current, siteName, vehicleNumberOrId, driverName, vehicleType: current.vehicleType });
+      if (asId) {
+        const asRow = buildNotificationRowForUser('assistant_supervisor', asId, title, body, () => generateId('n'), id, 'assigned_trip');
+        await supabase.from('notifications').insert(asRow);
+      } else {
+        const rows = buildNotificationRows('trip_need_approval', { ...current, siteName, vehicleNumberOrId, driverName, vehicleType: current.vehicleType }, () => generateId('n'));
+        for (const r of rows) await supabase.from('notifications').insert(r);
+      }
+    }
+    await refetch();
+  }, [authUser?.id, refetch, state.assignedTrips, state.sites, state.users, state.vehicles]);
+
   const updateTask = useCallback(async (id: string, patch: Partial<Task>) => {
     const row = taskToRow(patch);
     if (Object.keys(row).length === 0) return;
@@ -794,6 +955,41 @@ function useSupabaseStore(): MockAppStoreContextValue {
     }
     await refetch();
   }, [refetch, state.tasks, state.sites]);
+
+  const updateSiteTask = useCallback(async (id: string, patch: Partial<SiteTask>) => {
+    const row = siteTaskToRow(patch);
+    if (Object.keys(row).length === 0) return;
+    const { data, error } = await supabase
+      .from('site_tasks')
+      .update(row)
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      throw new Error(
+        'Update had no effect. Make sure this site is assigned to you (Assistant Supervisor) in Site settings.'
+      );
+    }
+    const task = state.siteTasks.find((t) => t.id === id);
+    if (task) {
+      const site = state.sites.find((s) => s.id === task.siteId);
+      const payload = {
+        id: task.id,
+        siteId: task.siteId,
+        taskName: patch.taskName ?? task.taskName,
+        siteName: site?.name,
+        status: patch.status ?? task.status,
+      };
+      if (patch.status === 'completed') {
+        const notifRows = buildNotificationRows('site_task_completed', payload, () => generateId('n'));
+        for (const r of notifRows) {
+          supabase.from('notifications').insert(r).then(() => {});
+        }
+      }
+    }
+    refetch().catch(() => {});
+  }, [refetch, state.siteTasks, state.sites]);
 
   const addReport = useCallback(async (report: Report) => {
     const row = reportToRow(report);
@@ -847,6 +1043,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       setMachineSessions,
       setSurveys,
       setIssues,
+      setWorkPhotos,
       setSiteAssignments,
       setContractRateRwf,
       updateSite,
@@ -862,6 +1059,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       updateSurvey,
       addIssue,
       updateIssue,
+      addWorkPhoto,
       setSiteAssignment,
       removeSiteAssignment,
       addUser,
@@ -873,7 +1071,10 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addSite,
       addBudgetAllocation,
       setDriverVehicleAssignment,
+      addAssignedTrip,
+      updateAssignedTripStatus,
       updateTask,
+      updateSiteTask,
       addReport,
       updateReport,
       addNotification,
@@ -890,6 +1091,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       setMachineSessions,
       setSurveys,
       setIssues,
+      setWorkPhotos,
       setSiteAssignments,
       setContractRateRwf,
       updateSite,
@@ -905,6 +1107,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       updateSurvey,
       addIssue,
       updateIssue,
+      addWorkPhoto,
       setSiteAssignment,
       removeSiteAssignment,
       addUser,
@@ -916,7 +1119,10 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addSite,
       addBudgetAllocation,
       setDriverVehicleAssignment,
+      addAssignedTrip,
+      updateAssignedTripStatus,
       updateTask,
+      updateSiteTask,
       addReport,
       updateReport,
       addNotification,

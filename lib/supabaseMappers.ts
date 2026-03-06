@@ -7,9 +7,12 @@ import type {
   MachineSession,
   Survey,
   Issue,
+  WorkPhoto,
   SiteAssignment,
   DriverVehicleAssignment,
+  AssignedTrip,
   Task,
+  SiteTask,
   Operation,
   Report,
   Notification,
@@ -165,16 +168,48 @@ export function surveyFromRow(row: Record<string, unknown>): Survey {
   };
 }
 
+export function workPhotoFromRow(row: Record<string, unknown>): WorkPhoto {
+  return {
+    id: String(row.id),
+    photoUrl: String(row.photo_url),
+    thumbnailUrl: String(row.thumbnail_url),
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    siteId: String(row.site_id),
+    projectId: row.project_id != null ? String(row.project_id) : undefined,
+    uploadedBy: String(row.uploaded_by),
+    userRole: String(row.user_role),
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+  };
+}
+
+export function workPhotoToRow(w: Partial<WorkPhoto>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (w.id != null) row.id = w.id;
+  if (w.photoUrl != null) row.photo_url = w.photoUrl;
+  if (w.thumbnailUrl != null) row.thumbnail_url = w.thumbnailUrl;
+  if (w.latitude != null) row.latitude = w.latitude;
+  if (w.longitude != null) row.longitude = w.longitude;
+  if (w.siteId != null) row.site_id = w.siteId;
+  if (w.projectId !== undefined) row.project_id = w.projectId ?? null;
+  if (w.uploadedBy != null) row.uploaded_by = w.uploadedBy;
+  if (w.userRole != null) row.user_role = w.userRole;
+  return row;
+}
+
 export function issueFromRow(row: Record<string, unknown>): Issue {
   return {
     id: String(row.id),
     siteId: String(row.site_id),
     siteName: row.site_name != null ? String(row.site_name) : undefined,
     raisedById: String(row.raised_by_id),
+    createdByRole: row.created_by_role != null ? String(row.created_by_role) : undefined,
     description: String(row.description),
     imageUris: (row.image_uris as string[]) ?? [],
     status: row.status as Issue['status'],
     createdAt: row.created_at != null ? String(row.created_at) : '',
+    resolvedBy: row.resolved_by != null ? String(row.resolved_by) : undefined,
+    resolvedAt: row.resolved_at != null ? String(row.resolved_at) : undefined,
   };
 }
 
@@ -195,6 +230,59 @@ export function driverVehicleAssignmentFromRow(row: Record<string, unknown>): Dr
   };
 }
 
+function parsePauseSegments(value: unknown): { startedAt: string; endedAt: string }[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((x): x is { started_at?: string; ended_at?: string } => x != null && typeof x === 'object')
+    .map((x) => ({ startedAt: String(x.started_at ?? ''), endedAt: String(x.ended_at ?? '') }))
+    .filter((s) => s.startedAt && s.endedAt);
+}
+
+export function assignedTripFromRow(row: Record<string, unknown>): AssignedTrip {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    vehicleId: String(row.vehicle_id),
+    driverId: String(row.driver_id),
+    vehicleType: row.vehicle_type as AssignedTrip['vehicleType'],
+    taskType: row.task_type != null ? String(row.task_type) : null,
+    status: row.status as AssignedTrip['status'],
+    notes: row.notes != null ? String(row.notes) : null,
+    createdBy: String(row.created_by),
+    createdAt: row.created_at != null ? String(row.created_at) : '',
+    startedAt: row.started_at != null ? String(row.started_at) : null,
+    pausedAt: row.paused_at != null ? String(row.paused_at) : null,
+    resumedAt: row.resumed_at != null ? String(row.resumed_at) : null,
+    pauseSegments: parsePauseSegments(row.pause_segments),
+    completedAt: row.completed_at != null ? String(row.completed_at) : null,
+    completedBy: row.completed_by != null ? String(row.completed_by) : null,
+  };
+}
+
+export function assignedTripToRow(a: Partial<AssignedTrip>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (a.id != null) row.id = a.id;
+  if (a.siteId != null) row.site_id = a.siteId;
+  if (a.vehicleId != null) row.vehicle_id = a.vehicleId;
+  if (a.driverId != null) row.driver_id = a.driverId;
+  if (a.vehicleType != null) row.vehicle_type = a.vehicleType;
+  if (a.taskType !== undefined) row.task_type = a.taskType ?? null;
+  if (a.status != null) row.status = a.status;
+  if (a.notes !== undefined) row.notes = a.notes ?? null;
+  if (a.createdBy != null) row.created_by = a.createdBy;
+  if (a.createdAt != null) row.created_at = a.createdAt;
+  if (a.startedAt !== undefined) row.started_at = a.startedAt ?? null;
+  if (a.pausedAt !== undefined) row.paused_at = a.pausedAt ?? null;
+  if (a.resumedAt !== undefined) row.resumed_at = a.resumedAt ?? null;
+  if (a.pauseSegments !== undefined) {
+    row.pause_segments = a.pauseSegments.map((s) => ({ started_at: s.startedAt, ended_at: s.endedAt }));
+  }
+  if (a.completedAt !== undefined) row.completed_at = a.completedAt ?? null;
+  if (a.completedBy !== undefined) row.completed_by = a.completedBy ?? null;
+  return row;
+}
+
 export function taskFromRow(row: Record<string, unknown>): Task {
   return {
     id: String(row.id),
@@ -210,6 +298,20 @@ export function taskFromRow(row: Record<string, unknown>): Task {
     createdAt: row.created_at != null ? String(row.created_at) : '',
     updatedAt: row.updated_at != null ? String(row.updated_at) : '',
     photos: (row.photos as string[]) ?? [],
+  };
+}
+
+export function siteTaskFromRow(row: Record<string, unknown>): SiteTask {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    taskName: String(row.task_name),
+    weight: Number(row.weight ?? 0),
+    status: String(row.status) as SiteTask['status'],
+    progress: Number(row.progress ?? 0),
+    notes: row.notes != null ? String(row.notes) : null,
+    updatedBy: row.updated_by != null ? String(row.updated_by) : null,
+    updatedAt: row.updated_at != null ? String(row.updated_at) : '',
   };
 }
 
@@ -408,9 +510,12 @@ export function issueToRow(i: Partial<Issue>): Record<string, unknown> {
   if (i.siteId != null) row.site_id = i.siteId;
   if (i.siteName !== undefined) row.site_name = i.siteName;
   if (i.raisedById != null) row.raised_by_id = i.raisedById;
+  if (i.createdByRole !== undefined) row.created_by_role = i.createdByRole;
   if (i.description != null) row.description = i.description;
   if (i.imageUris != null) row.image_uris = i.imageUris;
   if (i.status != null) row.status = i.status;
+  if (i.resolvedBy !== undefined) row.resolved_by = i.resolvedBy || null;
+  if (i.resolvedAt !== undefined) row.resolved_at = i.resolvedAt || null;
   return row;
 }
 
@@ -428,6 +533,20 @@ export function taskToRow(t: Partial<Task>): Record<string, unknown> {
   if (t.progress != null) row.progress = t.progress;
   if (t.updatedAt !== undefined) row.updated_at = t.updatedAt;
   if (t.photos != null) row.photos = t.photos;
+  return row;
+}
+
+export function siteTaskToRow(t: Partial<SiteTask>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (t.id != null) row.id = t.id;
+  if (t.siteId != null) row.site_id = t.siteId;
+  if (t.taskName != null) row.task_name = t.taskName;
+  if (t.weight != null) row.weight = t.weight;
+  if (t.status != null) row.status = t.status;
+  if (t.progress != null) row.progress = t.progress;
+  if (t.notes !== undefined) row.notes = t.notes ?? null;
+  if (t.updatedBy !== undefined) row.updated_by = t.updatedBy ?? null;
+  if (t.updatedAt !== undefined) row.updated_at = t.updatedAt ?? null;
   return row;
 }
 

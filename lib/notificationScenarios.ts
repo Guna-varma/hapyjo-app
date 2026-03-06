@@ -27,7 +27,10 @@ export type NotificationScenarioId =
   | 'task_completed'
   | 'task_assigned'
   | 'vehicle_added'
-  | 'vehicle_updated';
+  | 'vehicle_updated'
+  | 'site_task_completed'
+  | 'trip_assigned'
+  | 'trip_need_approval';
 
 export interface NotificationScenario {
   id: NotificationScenarioId;
@@ -43,14 +46,16 @@ export interface NotificationScenario {
 const scenarios: Record<NotificationScenarioId, NotificationScenario> = {
   issue_raised: {
     id: 'issue_raised',
-    targetRoles: ['admin', 'owner', 'head_supervisor', 'assistant_supervisor'],
+    targetRoles: ['owner', 'head_supervisor'],
     linkType: 'issue',
     linkIdKey: 'id',
     getTitle: () => 'New issue reported',
     getBody: (p) => {
       const site = p.siteName ? `[${String(p.siteName)}] ` : '';
-      const desc = typeof p.description === 'string' ? p.description.slice(0, 120) : 'No description';
-      return site + desc;
+      const desc = typeof p.description === 'string' ? p.description.slice(0, 100) : 'No description';
+      const role = typeof p.createdByRole === 'string' ? ` (${p.createdByRole})` : '';
+      const imgs = Array.isArray(p.imageUris) && p.imageUris.length > 0 ? ` • ${p.imageUris.length} image(s) attached` : '';
+      return `${site}Issue #${p.id ?? ''}${role}. ${desc}${imgs}`.trim();
     },
   },
 
@@ -220,6 +225,19 @@ const scenarios: Record<NotificationScenarioId, NotificationScenario> = {
     },
   },
 
+  site_task_completed: {
+    id: 'site_task_completed',
+    targetRoles: ['owner', 'head_supervisor'],
+    linkType: 'site',
+    linkIdKey: 'siteId',
+    getTitle: () => 'Site task completed',
+    getBody: (p) => {
+      const task = p.taskName ? String(p.taskName) : 'Task';
+      const site = p.siteName ? ` at [${p.siteName}]` : '';
+      return `${task}${site}`;
+    },
+  },
+
   vehicle_added: {
     id: 'vehicle_added',
     targetRoles: ['owner', 'head_supervisor', 'assistant_supervisor'],
@@ -283,6 +301,34 @@ const scenarios: Record<NotificationScenarioId, NotificationScenario> = {
       const site = p.siteName ? `[${p.siteName}]` : 'Site';
       const vehicle = p.vehicleNumberOrId ? ` ${String(p.vehicleNumberOrId)}` : '';
       return `${site}${vehicle}`.trim();
+    },
+  },
+
+  trip_assigned: {
+    id: 'trip_assigned',
+    targetRoles: ['driver_truck', 'driver_machine'],
+    linkType: 'assigned_trip',
+    linkIdKey: 'id',
+    getTitle: (p) => (p.vehicleType === 'machine' ? 'Machine task assigned' : 'Trip assigned'),
+    getBody: (p) => {
+      const site = p.siteName ? `[${p.siteName}]` : 'Site';
+      const vehicle = p.vehicleNumberOrId ? ` ${String(p.vehicleNumberOrId)}` : '';
+      const type = p.vehicleType === 'machine' ? 'Task' : 'Trip';
+      return `${type}${site}${vehicle}`.trim();
+    },
+  },
+
+  trip_need_approval: {
+    id: 'trip_need_approval',
+    targetRoles: ['assistant_supervisor'],
+    linkType: 'assigned_trip',
+    linkIdKey: 'id',
+    getTitle: (p) => (p.vehicleType === 'machine' ? 'Task confirmation' : 'Trip confirmation'),
+    getBody: (p) => {
+      const site = p.siteName ? `[${p.siteName}]` : 'Site';
+      const vehicle = p.vehicleNumberOrId ? ` ${String(p.vehicleNumberOrId)}` : '';
+      const driver = p.driverName ? ` • ${String(p.driverName)}` : '';
+      return `${site}${vehicle}${driver}`.trim() || 'Driver marked work complete. Confirm to close.';
     },
   },
 };

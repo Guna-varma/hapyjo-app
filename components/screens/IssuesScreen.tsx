@@ -35,6 +35,8 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useToast } from '@/context/ToastContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { generateId } from '@/lib/id';
+import { uploadIssueImage, getIssueImagePublicUrl } from '@/lib/issueImageStorage';
+import { compressIssueImage, getUriSizeInBytes, ISSUE_IMAGE_MAX_INPUT_BYTES } from '@/lib/compressIssueImage';
 import { AlertCircle, Plus } from 'lucide-react-native';
 import { colors, radius, spacing } from '@/theme/tokens';
 
@@ -44,19 +46,24 @@ export function IssuesScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, issues, addIssue, updateIssue, refetch, loading } = useMockAppStore();
+  const { sites, issues, users, addIssue, updateIssue, refetch, loading } = useMockAppStore();
   const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [updatingIssueId, setUpdatingIssueId] = useState<string | null>(null);
-  /** Add issue: only Asst Supervisor, Surveyor, Driver, Operator. Head supervisor / owner / admin cannot add. */
+  /** Add issue: only Assistant Supervisor, Driver, Operator (per Issue Reporting System). */
   const canRaise =
     user?.role === 'driver_truck' ||
     user?.role === 'driver_machine' ||
-    user?.role === 'assistant_supervisor' ||
-    user?.role === 'surveyor';
+    user?.role === 'assistant_supervisor';
   const canViewAll = user?.role === 'head_supervisor' || user?.role === 'owner' || user?.role === 'admin';
-  const canUpdateStatus = user?.role === 'head_supervisor' || user?.role === 'owner' || user?.role === 'admin';
+  const canUpdateStatus = user?.role === 'head_supervisor' || user?.role === 'owner';
+  const isAssistantSupervisor = user?.role === 'assistant_supervisor';
   const thumbnailSize = theme.scaleMin(64);
+
+  const getCreatorName = (userId: string) => users.find((u) => u.id === userId)?.name ?? userId.slice(0, 8) + '…';
+  const getCreatorRoleLabel = (role?: string) => (role ? t(`role_${role}` as Parameters<typeof t>[0]) : '—');
+  const formatIssueDateTime = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
   const [raiseModalVisible, setRaiseModalVisible] = useState(false);
   const [submittingIssue, setSubmittingIssue] = useState(false);
@@ -79,8 +86,8 @@ export function IssuesScreen() {
     filterSiteId === ALL_SITES_VALUE
       ? issues
       : issues.filter((i) => i.siteId === filterSiteId);
-  const myIssues = !canViewAll ? issues.filter((i) => i.raisedById === user?.id) : undefined;
-  const listIssues = canViewAll ? filteredIssues : myIssues ?? [];
+  const listIssues = filteredIssues;
+  const sectionTitleKey = canViewAll ? 'issues_all_issues' : isAssistantSupervisor ? 'issues_section_site_issues' : 'issues_my_issues';
 
   const getSiteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const statusVariant = {
@@ -209,7 +216,15 @@ export function IssuesScreen() {
         allowsMultipleSelection: true,
       });
       if (!result.canceled && result.assets?.length) {
-        setImageUris((prev) => [...prev, ...result.assets!.map((a) => a.uri)]);
+        const toAdd: string[] = [];
+        let skipped = 0;
+        for (const asset of result.assets) {
+          const size = await getUriSizeInBytes(asset.uri);
+          if (size > ISSUE_IMAGE_MAX_INPUT_BYTES) skipped++;
+          else toAdd.push(asset.uri);
+        }
+        if (toAdd.length) setImageUris((prev) => [...prev, ...toAdd]);
+        if (skipped > 0) showToast(t('issues_image_too_large'));
       }
     } catch {
       /* user cancelled or picker error */
@@ -222,16 +237,26 @@ export function IssuesScreen() {
   const submitIssue = async () => {
     if (!description.trim() || !siteId || !user?.id) return;
     const site = sites.find((s) => s.id === siteId);
+    const issueId = generateId('i');
     Keyboard.dismiss();
     setSubmittingIssue(true);
     try {
+      const uploadedPaths: string[] =
+        imageUris.length > 0
+          ? await Promise.all(
+              imageUris.map(async (uri) => {
+                const compressed = await compressIssueImage(uri);
+                return uploadIssueImage(issueId, compressed);
+              })
+            )
+          : [];
       await addIssue({
-        id: generateId('i'),
+        id: issueId,
         siteId,
         siteName: site?.name,
         raisedById: user.id,
         description: description.trim(),
-        imageUris: [...imageUris],
+        imageUris: uploadedPaths,
         status: 'open',
         createdAt: new Date().toISOString(),
       });
@@ -239,6 +264,9 @@ export function IssuesScreen() {
       setDescription('');
       setImageUris([]);
       showToast(t('issues_raise_success_message'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('alert_error');
+      showToast(message);
     } finally {
       setSubmittingIssue(false);
     }
@@ -280,7 +308,7 @@ export function IssuesScreen() {
           <SkeletonList count={5} />
         ) : (
           <>
-            {canViewAll && sites.length > 1 && (
+            {(canViewAll || isAssistantSupervisor) && sites.length > 1 && (
               <View style={styles.filterWrap}>
                 <FilterChips
                   options={siteFilterOptions}
@@ -292,15 +320,15 @@ export function IssuesScreen() {
             )}
 
             <Text style={styles.sectionTitle}>
-              {canViewAll ? t('issues_all_issues') : t('issues_my_issues')}
+              {t(sectionTitleKey)}
             </Text>
             {listIssues.length === 0 ? (
               <EmptyState
                 title={
-                  canViewAll ? t('issues_none_reported') : t('issues_none_raised')
+                  canViewAll ? t('issues_none_reported') : isAssistantSupervisor ? t('issues_none_reported') : t('issues_none_raised')
                 }
                 message={
-                  canViewAll ? t('issues_none_reported_message') : t('issues_none_raised_message')
+                  canViewAll ? t('issues_none_reported_message') : isAssistantSupervisor ? t('issues_none_reported_message') : t('issues_none_raised_message')
                 }
               />
             ) : (
@@ -323,7 +351,7 @@ export function IssuesScreen() {
                         (issue.description.length > 60 ? '…' : '')
                       }
                       subtitle={issue.siteName ?? getSiteName(issue.siteId)}
-                      meta={`${issue.createdAt.slice(0, 10)}${(issue.imageUris?.length ?? 0) > 0 ? ` · ${issue.imageUris!.length} ${t('issues_images_attached')}` : ''}`}
+                      meta={`${t('issues_created_by')} ${getCreatorName(issue.raisedById)} · ${t('issues_creator_role')} ${getCreatorRoleLabel(issue.createdByRole)} · ${t('issues_created_at')} ${formatIssueDateTime(issue.createdAt)}${canViewAll && (issue.imageUris?.length ?? 0) > 0 ? ` · ${issue.imageUris!.length} ${t('issues_images_attached')}` : ''}`}
                       right={
                         <View style={styles.issueRightRow}>
                           {isUpdating && (
@@ -338,31 +366,34 @@ export function IssuesScreen() {
                         </View>
                       }
                       footer={
-                        (issue.imageUris?.length ?? 0) > 0 ? (
+                        canViewAll && (issue.imageUris?.length ?? 0) > 0 ? (
                           <View style={styles.issueImagesSection}>
                             <ScrollView
                               horizontal
                               showsHorizontalScrollIndicator={false}
                               contentContainerStyle={styles.issueThumbsScroll}
                             >
-                              {(issue.imageUris ?? []).map((uri, idx) => (
-                                <TouchableOpacity
-                                  key={`${issue.id}-${idx}-${uri.slice(-12)}`}
-                                  onPress={(e) => { e?.stopPropagation?.(); setViewingImageUri(uri); }}
-                                  activeOpacity={0.8}
-                                  style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
-                                >
-                                  <Image
-                                    source={{ uri }}
-                                    style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]}
-                                    resizeMode="cover"
-                                  />
-                                </TouchableOpacity>
-                              ))}
+                              {(issue.imageUris ?? []).map((uri, idx) => {
+                                const displayUri = getIssueImagePublicUrl(uri);
+                                return (
+                                  <TouchableOpacity
+                                    key={`${issue.id}-${idx}-${uri.slice(-12)}`}
+                                    onPress={(e) => { e?.stopPropagation?.(); setViewingImageUri(displayUri); }}
+                                    activeOpacity={0.8}
+                                    style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
+                                  >
+                                    <Image
+                                      source={{ uri: displayUri }}
+                                      style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]}
+                                      resizeMode="cover"
+                                    />
+                                  </TouchableOpacity>
+                                );
+                              })}
                             </ScrollView>
                             <View style={styles.issueImageActions}>
                               <TouchableOpacity
-                                onPress={(e) => { e?.stopPropagation?.(); issue.imageUris?.length && setViewingImageUri(issue.imageUris![0]); }}
+                                onPress={(e) => { e?.stopPropagation?.(); issue.imageUris?.length && setViewingImageUri(getIssueImagePublicUrl(issue.imageUris![0])); }}
                                 style={styles.issueImageBtn}
                               >
                                 <Text style={styles.issueImageBtnText}>{t('issues_view_images')}</Text>
@@ -370,7 +401,7 @@ export function IssuesScreen() {
                               {(issue.imageUris ?? []).map((uri, idx) => (
                                 <TouchableOpacity
                                   key={`dl-${idx}`}
-                                  onPress={(e) => { e?.stopPropagation?.(); handleDownloadImage(uri); }}
+                                  onPress={(e) => { e?.stopPropagation?.(); handleDownloadImage(getIssueImagePublicUrl(uri)); }}
                                   style={styles.issueImageBtn}
                                 >
                                   <Text style={styles.issueImageBtnText}>
@@ -444,33 +475,41 @@ export function IssuesScreen() {
                   <Text style={styles.detailSectionLabel}>{t('issues_description')}</Text>
                   <Text style={styles.detailDescription}>{selectedIssue.description}</Text>
                   <Text style={styles.detailMeta}>
-                    {selectedIssue.siteName ?? getSiteName(selectedIssue.siteId)} · {selectedIssue.createdAt.slice(0, 10)}
+                    {selectedIssue.siteName ?? getSiteName(selectedIssue.siteId)}
                   </Text>
+                  <View style={styles.detailCreatorBlock}>
+                    <Text style={styles.detailCreatorLabel}>{t('issues_created_by')}</Text>
+                    <Text style={styles.detailCreatorValue}>{getCreatorName(selectedIssue.raisedById)}</Text>
+                    <Text style={styles.detailCreatorLabel}>{t('issues_creator_role')}</Text>
+                    <Text style={styles.detailCreatorValue}>{getCreatorRoleLabel(selectedIssue.createdByRole)}</Text>
+                    <Text style={styles.detailCreatorLabel}>{t('issues_created_at')}</Text>
+                    <Text style={styles.detailCreatorValue}>{formatIssueDateTime(selectedIssue.createdAt)}</Text>
+                  </View>
                   <View style={styles.detailBadgeWrap}>
                     <Badge variant={statusVariant[selectedIssue.status]} size="sm">
                       {t(`issues_status_${selectedIssue.status}`)}
                     </Badge>
                   </View>
-                  {(selectedIssue.imageUris?.length ?? 0) > 0 && (
+                  {canViewAll && (selectedIssue.imageUris?.length ?? 0) > 0 && (
                     <View style={styles.detailImagesWrap}>
                       <Text style={styles.detailImagesLabel}>{t('issues_images_attached')}</Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.issueThumbsScroll}>
                         {(selectedIssue.imageUris ?? []).map((uri, idx) => (
                           <TouchableOpacity
                             key={idx}
-                            onPress={() => setViewingImageUri(uri)}
+                            onPress={() => setViewingImageUri(getIssueImagePublicUrl(uri))}
                             style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
                           >
-                            <Image source={{ uri }} style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]} resizeMode="cover" />
+                            <Image source={{ uri: getIssueImagePublicUrl(uri) }} style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]} resizeMode="cover" />
                           </TouchableOpacity>
                         ))}
                       </ScrollView>
                       <View style={styles.issueImageActions}>
-                        <TouchableOpacity onPress={() => setViewingImageUri(selectedIssue.imageUris![0])} style={styles.issueImageBtn}>
+                        <TouchableOpacity onPress={() => setViewingImageUri(getIssueImagePublicUrl(selectedIssue.imageUris![0]))} style={styles.issueImageBtn}>
                           <Text style={styles.issueImageBtnText}>{t('issues_view_images')}</Text>
                         </TouchableOpacity>
                         {(selectedIssue.imageUris ?? []).map((uri, idx) => (
-                          <TouchableOpacity key={idx} onPress={() => handleDownloadImage(uri)} style={styles.issueImageBtn}>
+                          <TouchableOpacity key={idx} onPress={() => handleDownloadImage(getIssueImagePublicUrl(uri))} style={styles.issueImageBtn}>
                             <Text style={styles.issueImageBtnText}>{t('issues_download_image')}{(selectedIssue.imageUris?.length ?? 0) > 1 ? ` (${idx + 1})` : ''}</Text>
                           </TouchableOpacity>
                         ))}
@@ -565,6 +604,7 @@ export function IssuesScreen() {
           containerStyle={{ marginBottom: spacing.sm }}
         />
         <Text style={modalStyles.label}>{t('issues_raise_attach_images')}</Text>
+        <Text style={styles.imagesHint}>{t('issues_raise_images_hint')}</Text>
         <View style={styles.imageRow}>
           <TouchableOpacity onPress={addImage} style={styles.addImageBtn}>
             <Plus size={24} color={colors.textMuted} />
@@ -705,6 +745,25 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginBottom: spacing.sm,
   },
+  detailCreatorBlock: {
+    marginBottom: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: radius.sm,
+  },
+  detailCreatorLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  detailCreatorValue: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+  },
   detailBadgeWrap: {
     marginBottom: spacing.md,
   },
@@ -787,6 +846,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   modalChipsMargin: { height: spacing.sm },
+  imagesHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: spacing.xs,
+  },
   imageRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

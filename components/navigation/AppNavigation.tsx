@@ -39,6 +39,7 @@ import { ExpensesScreen } from '@/components/screens/ExpensesScreen';
 import { DriverTripsScreen } from '@/components/screens/DriverTripsScreen';
 import { SurveysScreen } from '@/components/screens/SurveysScreen';
 import { IssuesScreen } from '@/components/screens/IssuesScreen';
+import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 
 const TAB_CONFIG: Record<TabId, { labelKey: string; icon: typeof LayoutDashboard }> = {
   dashboard: { labelKey: 'tab_dashboard', icon: LayoutDashboard },
@@ -121,11 +122,11 @@ export function AppNavigation() {
       case 'reports':
         return <ReportsScreen />;
       case 'tasks':
-        return user?.role === 'driver_truck' || user?.role === 'driver_machine' || user?.role === 'assistant_supervisor' || user?.role === 'head_supervisor' ? (
-          <DriverTripsScreen />
-        ) : (
-          <RoleBasedDashboard onNavigateTab={setActiveTab} />
-        );
+        return user?.role === 'driver_truck' || user?.role === 'driver_machine'
+          ? <DriverTripsScreen />
+          : user?.role === 'assistant_supervisor'
+            ? <SiteTasksScreen />
+            : <RoleBasedDashboard onNavigateTab={setActiveTab} />;
       case 'users':
         return <UsersScreen />;
       case 'sites':

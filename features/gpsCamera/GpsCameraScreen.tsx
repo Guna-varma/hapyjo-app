@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,267 +6,411 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Linking,
+  ScrollView,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { useGpsLocation } from './useGpsLocation';
-import { compressImage } from './compressImage';
-import { uploadToSupabase } from './uploadToSupabase';
-import { saveGpsRecord } from './saveGpsRecord';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useResponsiveTheme } from '@/theme/responsive';
-import { supabase } from '@/lib/supabase';
+import { useGpsLocation } from './useGpsLocation';
+import { useMockAppStore } from '@/context/MockAppStoreContext';
+import { canAccessTab } from '@/lib/rbac';
+import {
+  validateAndPrepareWorkPhoto,
+  generateThumbnail,
+  uploadWorkPhoto,
+  isAllowedImageFormat,
+} from '@/lib/workPhotoUpload';
+import { parseExifGps } from '@/lib/workPhotoExif';
+import { useToast } from '@/context/ToastContext';
+import { generateId } from '@/lib/id';
+import { Camera, Image as ImageIcon, CheckCircle } from 'lucide-react-native';
+import { colors, radius, spacing } from '@/theme/tokens';
+import { FilterChips } from '@/components/ui';
+import { WorkProgressGalleryScreen } from '@/components/workProgress/WorkProgressGalleryScreen';
 
-const PLAY_STORE_URL =
-  'https://play.google.com/store/apps/details?id=com.gpsmapcamera.geotagginglocationonphoto&hl=en_IN&pli=1';
-
-const UPLOAD_RETRIES = 2;
-const FALLBACK_LAT = 0;
-const FALLBACK_LON = 0;
+const ALL_SITES_VALUE = '';
 
 export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
+  const { showToast } = useToast();
   const { getCurrentLocation, error: gpsError } = useGpsLocation();
+  const { sites, siteAssignments, users, addWorkPhoto, refetch, workPhotos } = useMockAppStore();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const [uploading, setUploading] = useState(false);
+  const canAccess = user?.role && canAccessTab(user.role, 'gps_camera');
+  const canCapture = canAccess && (user?.role === 'assistant_supervisor' || user?.role === 'surveyor');
+  const mySiteIds = useMemo(() => {
+    if (!user?.id) return [];
+    return siteAssignments.filter((a) => a.userId === user.id).map((a) => a.siteId);
+  }, [user?.id, siteAssignments]);
+  const siteOptions = useMemo(() => {
+    const list = user?.role === 'assistant_supervisor' || user?.role === 'surveyor'
+      ? sites.filter((s) => mySiteIds.length === 0 || mySiteIds.includes(s.id))
+      : sites;
+    return [{ value: ALL_SITES_VALUE, label: t('work_photo_select_site') }, ...list.map((s) => ({ value: s.id, label: s.name }))];
+  }, [sites, mySiteIds, user?.role, t]);
+
+  const [siteId, setSiteId] = useState(ALL_SITES_VALUE);
+  const [capturing, setCapturing] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
+  const [galleryRefreshing, setGalleryRefreshing] = useState(false);
+  const handleGalleryRefresh = useCallback(async () => {
+    setGalleryRefreshing(true);
+    await refetch();
+    setGalleryRefreshing(false);
+  }, [refetch]);
 
-  useEffect(() => {
-    void Promise.resolve(supabase.rpc('prune_old_gps_photos')).then(() => {}, () => {});
-  }, []);
-
-  const openPlayStore = useCallback(() => {
-    Linking.openURL(PLAY_STORE_URL);
-  }, []);
-
-  const pickAndUploadPhoto = useCallback(async () => {
-    if (!user?.id) return;
-
-    const { status: permStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permStatus !== 'granted') {
-      Alert.alert(t('alert_error'), t('gps_camera_need_media_permission'));
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 1,
-    });
-
-    if (result.canceled || !result.assets?.[0]?.uri) return;
-
-    const photoUri = result.assets[0].uri;
-    setUploading(true);
-
-    setStatus(t('gps_camera_status_compressing'));
-    let compressedUri: string;
-    try {
-      compressedUri = await compressImage(photoUri);
-    } catch (e) {
-      setUploading(false);
-      setStatus(null);
-      Alert.alert(t('alert_compression_error'), e instanceof Error ? e.message : t('gps_camera_compress_failed'));
-      return;
-    }
-
-    setStatus(t('gps_camera_status_uploading'));
-    let imageUrl: string | null = null;
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= UPLOAD_RETRIES; attempt++) {
+  /** Shared: validate → compress → thumbnail → upload → save. Keeps flow lightweight, no duplicate code. */
+  const processAndSaveWorkPhoto = useCallback(
+    async (imageUri: string, latitude: number, longitude: number) => {
+      if (!user?.id || !user?.role || !siteId || siteId === ALL_SITES_VALUE) return;
       try {
-        imageUrl = await uploadToSupabase(compressedUri);
-        lastError = null;
-        break;
+        setStatus(t('work_photo_status_compress'));
+        const { uri: photoUri } = await validateAndPrepareWorkPhoto(imageUri);
+        const thumbUri = await generateThumbnail(photoUri);
+        const photoId = generateId('wp');
+        setStatus(t('work_photo_status_upload'));
+        const { photoUrl, thumbnailUrl } = await uploadWorkPhoto(photoId, photoUri, thumbUri);
+        setStatus(t('work_photo_status_save'));
+        await addWorkPhoto({
+          photoUrl,
+          thumbnailUrl,
+          latitude,
+          longitude,
+          siteId,
+          uploadedBy: user.id,
+          userRole: user.role,
+        });
+        await refetch();
+        setCapturing(false);
+        setStatus(null);
+        setUploadSuccess(true);
+        setTimeout(() => setUploadSuccess(false), 2500);
+        showToast(t('work_photo_upload_success'));
       } catch (e) {
-        lastError = e instanceof Error ? e : new Error(String(e));
-        if (attempt < UPLOAD_RETRIES) {
-          setStatus(`${t('gps_camera_upload_retry')} ${attempt + 2}/${UPLOAD_RETRIES + 1}…`);
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-        }
+        setCapturing(false);
+        setStatus(null);
+        const msg = e instanceof Error ? e.message : t('alert_error');
+        Alert.alert(t('alert_error'), msg);
       }
-    }
-    if (lastError || !imageUrl) {
-      setUploading(false);
-      setStatus(null);
-      Alert.alert(t('alert_upload_error'), lastError?.message || t('gps_camera_upload_failed'));
+    },
+    [user?.id, user?.role, siteId, addWorkPhoto, refetch, t, showToast]
+  );
+
+  const handleCaptureWorkPhoto = useCallback(async () => {
+    if (!user?.id || !user?.role) return;
+    if (!siteId || siteId === ALL_SITES_VALUE) {
+      showToast(t('work_photo_select_site'));
       return;
     }
-
-    setStatus(t('gps_camera_status_saving'));
-    let latitude = FALLBACK_LAT;
-    let longitude = FALLBACK_LON;
+    setCapturing(true);
+    setStatus(t('work_photo_status_gps'));
+    let latitude: number;
+    let longitude: number;
     try {
       const coords = await getCurrentLocation();
       latitude = coords.latitude;
       longitude = coords.longitude;
     } catch {
-      /* use fallback 0,0 so we still save the photo */
-    }
-
-    const capturedAt = new Date();
-    try {
-      await saveGpsRecord(user.id, {
-        image_url: imageUrl,
-        latitude,
-        longitude,
-        address: undefined,
-        city: undefined,
-        region: undefined,
-        country: undefined,
-        postal_code: undefined,
-        captured_at: capturedAt.toISOString(),
-      });
-    } catch (e) {
-      setUploading(false);
+      setCapturing(false);
       setStatus(null);
-      Alert.alert(t('alert_save_error'), e instanceof Error ? e.message : t('gps_camera_save_failed'));
+      Alert.alert(t('alert_error'), t('work_photo_location_required'));
       return;
     }
-
-    setUploading(false);
-    setStatus(null);
-    Alert.alert(t('alert_done'), t('gps_camera_photo_saved'), [{ text: t('common_ok') }]);
-  }, [user?.id, getCurrentLocation, t]);
-
-  const showHasAppAndPickPhoto = useCallback(() => {
-    Alert.alert(
-      t('gps_camera_capture_title'),
-      t('gps_camera_capture_message'),
-      [{ text: t('common_ok'), onPress: pickAndUploadPhoto }]
-    );
-  }, [t, pickAndUploadPhoto]);
-
-  const showNoAppPopup = useCallback(() => {
-    Alert.alert(
-      t('gps_camera_download_title'),
-      t('gps_camera_download_message'),
-      [
-        { text: t('gps_camera_open_play_store'), onPress: openPlayStore },
-        { text: t('common_ok') },
-      ]
-    );
-  }, [t, openPlayStore]);
-
-  const showUploadChoice = useCallback(() => {
-    if (!user?.id) {
-      Alert.alert(t('alert_error'), t('gps_camera_must_sign_in'));
+    setStatus(t('work_photo_status_capture'));
+    const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
+    if (cameraPerm.status !== 'granted') {
+      setCapturing(false);
+      setStatus(null);
+      Alert.alert(t('alert_error'), t('gps_camera_need_media_permission'));
       return;
     }
-    Alert.alert(
-      t('gps_camera_app_title'),
-      t('gps_camera_do_you_have_app'),
-      [
-        { text: t('gps_camera_no_download'), onPress: () => showNoAppPopup() },
-        { text: t('gps_camera_yes_upload'), onPress: () => showHasAppAndPickPhoto() },
-        { text: t('common_cancel'), style: 'cancel' },
-      ]
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+      exif: true,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      setCapturing(false);
+      setStatus(null);
+      return;
+    }
+    const asset = result.assets[0];
+    const uri = asset.uri;
+    const mimeType = (asset as { mimeType?: string }).mimeType;
+    if (!isAllowedImageFormat(uri, mimeType)) {
+      setCapturing(false);
+      setStatus(null);
+      Alert.alert(t('alert_error'), t('work_photo_only_images'));
+      return;
+    }
+    const exifGps = parseExifGps((asset as { exif?: Record<string, unknown> | null }).exif);
+    const lat = exifGps?.latitude ?? latitude;
+    const lon = exifGps?.longitude ?? longitude;
+    await processAndSaveWorkPhoto(uri, lat, lon);
+  }, [user?.id, user?.role, siteId, getCurrentLocation, t, showToast, processAndSaveWorkPhoto]);
+
+  /** Fallback when camera not working: pick from gallery; uses current GPS and upload time. */
+  const handleUploadFromGallery = useCallback(async () => {
+    if (!user?.id || !user?.role) return;
+    if (!siteId || siteId === ALL_SITES_VALUE) {
+      showToast(t('work_photo_select_site'));
+      return;
+    }
+    setCapturing(true);
+    setStatus(t('work_photo_status_gps'));
+    let latitude: number;
+    let longitude: number;
+    try {
+      const coords = await getCurrentLocation();
+      latitude = coords.latitude;
+      longitude = coords.longitude;
+    } catch {
+      setCapturing(false);
+      setStatus(null);
+      Alert.alert(t('alert_error'), t('work_photo_location_required'));
+      return;
+    }
+    const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (libPerm.status !== 'granted') {
+      setCapturing(false);
+      setStatus(null);
+      Alert.alert(t('alert_error'), t('gps_camera_need_media_permission'));
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+      exif: true,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      setCapturing(false);
+      setStatus(null);
+      return;
+    }
+    const asset = result.assets[0];
+    const uri = asset.uri;
+    const mimeType = (asset as { mimeType?: string }).mimeType;
+    if (!isAllowedImageFormat(uri, mimeType)) {
+      setCapturing(false);
+      setStatus(null);
+      Alert.alert(t('alert_error'), t('work_photo_only_images'));
+      return;
+    }
+    const exifGps = parseExifGps((asset as { exif?: Record<string, unknown> | null }).exif);
+    const lat = exifGps?.latitude ?? latitude;
+    const lon = exifGps?.longitude ?? longitude;
+    await processAndSaveWorkPhoto(uri, lat, lon);
+  }, [user?.id, user?.role, siteId, getCurrentLocation, t, showToast, processAndSaveWorkPhoto]);
+
+  if (!canAccess) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.blockContent}>
+          <Text style={styles.blockTitle}>{t('work_photo_only_roles')}</Text>
+          <Text style={styles.blockMessage}>
+            Only Surveyors and Assistant Supervisors can capture work progress photos at site locations.
+          </Text>
+        </View>
+      </View>
     );
-  }, [user?.id, t, showHasAppAndPickPhoto, showNoAppPopup]);
+  }
 
   return (
     <View style={styles.container}>
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>{t('gps_camera_screen_title')}</Text>
-        <Text style={styles.instruction}>{t('gps_camera_screen_instruction')}</Text>
-
-        <TouchableOpacity onPress={openPlayStore} style={styles.primaryBtn}>
-          <Text style={styles.primaryBtnText}>{t('gps_camera_get_app')}</Text>
+        <Text style={styles.instruction}>
+          Capture work progress photos with GPS. Location required. Compressed to ~50KB. {t('work_photo_exif_hint')}
+        </Text>
+        {canCapture && (
+          <>
+            <Text style={styles.label}>{t('work_photo_site')}</Text>
+            <FilterChips
+              options={siteOptions}
+              value={siteId}
+              onChange={setSiteId}
+              scroll={siteOptions.length > 4}
+            />
+            <TouchableOpacity
+              onPress={handleCaptureWorkPhoto}
+              disabled={capturing || !siteId || siteId === ALL_SITES_VALUE}
+              style={[styles.captureBtn, (capturing || !siteId || siteId === ALL_SITES_VALUE) && styles.captureBtnDisabled]}
+            >
+              {capturing ? (
+                <ActivityIndicator color={colors.surface} />
+              ) : (
+                <>
+                  <Camera size={22} color={colors.surface} />
+                  <Text style={styles.captureBtnText}>{t('work_photo_capture_btn')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleUploadFromGallery}
+              disabled={capturing || !siteId || siteId === ALL_SITES_VALUE}
+              style={[styles.galleryUploadBtn, (capturing || !siteId || siteId === ALL_SITES_VALUE) && styles.captureBtnDisabled]}
+            >
+              <ImageIcon size={20} color={colors.primary} />
+              <Text style={styles.galleryUploadBtnText}>{t('work_photo_upload_from_gallery')}</Text>
+            </TouchableOpacity>
+            <Text style={styles.hint}>{t('work_photo_upload_from_gallery_hint')}</Text>
+            {uploadSuccess && (
+              <View style={styles.successRow}>
+                <CheckCircle size={20} color={colors.success} />
+                <Text style={styles.successText}>{t('work_photo_upload_success')}</Text>
+              </View>
+            )}
+          </>
+        )}
+        <TouchableOpacity onPress={() => setShowGallery(true)} style={styles.galleryBtn}>
+          <ImageIcon size={20} color={colors.primary} />
+          <Text style={styles.galleryBtnText}>{t('work_photo_view_gallery')}</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={showUploadChoice}
-          disabled={uploading}
-          style={[styles.secondaryBtn, uploading && styles.btnDisabled]}
-        >
-          {uploading ? (
-            <ActivityIndicator color="#1E40AF" />
-          ) : (
-            <Text style={styles.secondaryBtnText}>{t('gps_camera_upload_photo')}</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
+      </ScrollView>
       {gpsError ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>{gpsError}</Text>
         </View>
       ) : null}
-
       {status ? (
         <View style={styles.statusBar}>
           <Text style={styles.statusText}>{status}</Text>
         </View>
       ) : null}
+      {showGallery && (
+        <View style={StyleSheet.absoluteFill}>
+          <WorkProgressGalleryScreen
+            workPhotos={workPhotos}
+            sites={sites}
+            users={users}
+            onBack={() => setShowGallery(false)}
+            onRefresh={handleGalleryRefresh}
+            refreshing={galleryRefreshing}
+          />
+        </View>
+      )}
     </View>
   );
 }
 
 function makeStyles(theme: ReturnType<typeof useResponsiveTheme>) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8fafc' },
-    content: {
+    container: { flex: 1, backgroundColor: colors.background },
+    blockContent: {
       flex: 1,
       padding: theme.screenPadding,
-      paddingVertical: theme.spacingLg,
       justifyContent: 'center',
-      alignItems: 'stretch',
+      alignItems: 'center',
+    },
+    blockTitle: {
+      fontSize: theme.fontSizeTitle,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: spacing.md,
+      textAlign: 'center',
+    },
+    blockMessage: {
+      fontSize: theme.fontSizeBase,
+      color: colors.textMuted,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    scrollContent: {
+      padding: theme.screenPadding,
+      paddingBottom: theme.spacingXl,
     },
     title: {
       fontSize: theme.fontSizeTitle,
       fontWeight: '700',
-      color: '#0f172a',
-      marginBottom: theme.spacingMd,
-      textAlign: 'center',
+      color: colors.text,
+      marginBottom: spacing.sm,
     },
     instruction: {
       fontSize: theme.fontSizeBase - 1,
-      color: '#475569',
-      lineHeight: theme.fontSizeBase + 6,
-      marginBottom: theme.spacingXl,
-      textAlign: 'center',
+      color: colors.textMuted,
+      lineHeight: 22,
+      marginBottom: spacing.md,
     },
-    primaryBtn: {
-      backgroundColor: '#2563eb',
-      paddingVertical: theme.spacingMd,
-      borderRadius: 12,
+    label: {
+      fontSize: theme.fontSizeCaption,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginBottom: spacing.xs,
+    },
+    captureBtn: {
+      flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: theme.spacingMd,
+      justifyContent: 'center',
+      gap: spacing.sm,
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: radius.md,
+      marginTop: spacing.md,
     },
-    primaryBtnText: { color: '#fff', fontSize: theme.fontSizeBase, fontWeight: '600' },
-    secondaryBtn: {
-      backgroundColor: '#fff',
-      paddingVertical: theme.spacingMd,
-      borderRadius: 12,
+    captureBtnDisabled: { opacity: 0.6 },
+    captureBtnText: { color: colors.surface, fontSize: theme.fontSizeBase, fontWeight: '600' },
+    galleryUploadBtn: {
+      flexDirection: 'row',
       alignItems: 'center',
-      borderWidth: 2,
-      borderColor: '#1E40AF',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+      marginTop: spacing.sm,
     },
-    btnDisabled: { opacity: 0.7 },
-    secondaryBtnText: { color: '#1E40AF', fontSize: theme.fontSizeBase, fontWeight: '600' },
+    galleryUploadBtnText: { color: colors.primary, fontSize: theme.fontSizeBase - 1, fontWeight: '600' },
+    hint: {
+      fontSize: theme.fontSizeCaption,
+      color: colors.textMuted,
+      marginTop: spacing.xs,
+      marginBottom: spacing.sm,
+    },
+    successRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginTop: spacing.sm,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      backgroundColor: colors.backgroundSecondary ?? colors.background,
+      borderRadius: 8,
+    },
+    successText: { color: colors.success ?? '#22c55e', fontSize: theme.fontSizeBase, fontWeight: '600' },
+    galleryBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      paddingVertical: spacing.md,
+      marginTop: spacing.sm,
+    },
+    galleryBtnText: { color: colors.primary, fontSize: theme.fontSizeBase, fontWeight: '600' },
     banner: {
       position: 'absolute',
-      top: theme.spacingLg + 24,
+      top: spacing.lg + 24,
       left: theme.screenPadding,
       right: theme.screenPadding,
-      backgroundColor: 'rgba(200,0,0,0.8)',
-      padding: theme.spacingSm,
-      borderRadius: theme.spacingSm,
+      backgroundColor: 'rgba(200,0,0,0.85)',
+      padding: spacing.sm,
+      borderRadius: radius.sm,
     },
-    bannerText: { color: '#fff', fontSize: theme.fontSizeCaption },
+    bannerText: { color: colors.surface, fontSize: theme.fontSizeCaption },
     statusBar: {
       position: 'absolute',
-      bottom: theme.spacingLg,
+      bottom: spacing.lg,
       alignSelf: 'center',
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      paddingHorizontal: theme.spacingMd,
-      paddingVertical: theme.spacingSm,
-      borderRadius: theme.spacingSm,
+      backgroundColor: 'rgba(0,0,0,0.65)',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.sm,
     },
-    statusText: { color: '#fff', fontSize: theme.fontSizeCaption },
+    statusText: { color: colors.surface, fontSize: theme.fontSizeCaption },
   });
 }

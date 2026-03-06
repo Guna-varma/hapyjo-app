@@ -12,10 +12,12 @@ import { useToast } from '@/context/ToastContext';
 import { formatAmount } from '@/lib/currency';
 import { colors, spacing, radius } from '@/theme/tokens';
 import { getRoleLabelKey } from '@/lib/rbac';
-import type { Task } from '@/types';
-import type { UserRole } from '@/types';
+import type { Task, AssignedTrip, UserRole } from '@/types';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
-import { Users, Fuel, CheckCircle2, User, Phone, Truck, Pencil, PhoneCall } from 'lucide-react-native';
+import { Users, Fuel, CheckCircle2, User, Phone, Truck, Pencil, PhoneCall, Percent, Wrench } from 'lucide-react-native';
+import { generateId } from '@/lib/id';
+import { getInitialStatusForVehicleType, getCompletedStatus, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Linking } from 'react-native';
 
 function normalizeId(id: string) {
@@ -58,16 +60,90 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const { user } = useAuth();
   const { t } = useLocale();
   const { showToast } = useToast();
-  const { sites, tasks, siteAssignments, users, driverVehicleAssignments, vehicles, updateUser } = useMockAppStore();
+  const { sites, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, addAssignedTrip, updateAssignedTripStatus, updateUser } = useMockAppStore();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editPhoneUserId, setEditPhoneUserId] = useState<string | null>(null);
   const [editPhoneValue, setEditPhoneValue] = useState('');
   const [savingPhone, setSavingPhone] = useState(false);
+  const [assignTripModalVisible, setAssignTripModalVisible] = useState(false);
+  const [assignTaskModalVisible, setAssignTaskModalVisible] = useState(false);
+  const [assignVehicleId, setAssignVehicleId] = useState('');
+  const [assignDriverId, setAssignDriverId] = useState('');
+  const [assignTaskType, setAssignTaskType] = useState('');
+  const [assignNotes, setAssignNotes] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
 
   const siteIds = user?.siteAccess ?? [];
   const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0] ?? null;
-  const siteTasks = assignedSite ? tasks.filter((taskItem) => taskItem.siteId === assignedSite.id) : [];
+  const TEMPLATE_ORDER = [
+    'Pre-cut survey',
+    'Land clearing',
+    'Excavation',
+    'Rock breaking',
+    'Soil transport',
+    'Leveling',
+    'Compaction',
+    'After-cut survey',
+    'Final finishing',
+  ];
+
+  const siteTasks = useMemo(() => {
+    if (!assignedSite) return [];
+    const active = siteTasksAll.filter(
+      (t) => t.siteId === assignedSite.id && (t.status === 'started' || t.status === 'in_progress')
+    );
+    return active
+      .slice()
+      .sort((a, b) => {
+        const ia = TEMPLATE_ORDER.indexOf(a.taskName);
+        const ib = TEMPLATE_ORDER.indexOf(b.taskName);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.taskName.localeCompare(b.taskName);
+      });
+  }, [assignedSite, siteTasksAll]);
   const remainingDays = assignedSite ? getRemainingDays(assignedSite.expectedEndDate) : null;
+
+  const siteTrips = useMemo(() => {
+    if (!assignedSite) return [];
+    return assignedTrips.filter((a) => normalizeId(a.siteId) === normalizeId(assignedSite.id) && a.vehicleType === 'truck');
+  }, [assignedSite, assignedTrips]);
+
+  const siteAssignedTasks = useMemo(() => {
+    if (!assignedSite) return [];
+    return assignedTrips.filter((a) => normalizeId(a.siteId) === normalizeId(assignedSite.id) && a.vehicleType === 'machine');
+  }, [assignedSite, assignedTrips]);
+
+  const trucksWithDriver = useMemo(() => {
+    if (!assignedSite) return [];
+    const siteVehicles = vehicles.filter((v) => normalizeId(v.siteId) === normalizeId(assignedSite.id) && v.type === 'truck');
+    return siteVehicles
+      .map((v) => {
+        const assignment = driverVehicleAssignments.find(
+          (a) => normalizeId(a.siteId) === normalizeId(assignedSite.id) && (a.vehicleIds ?? []).includes(v.id)
+        );
+        const driverId = assignment?.driverId;
+        const driver = driverId ? users.find((u) => normalizeId(u.id) === normalizeId(driverId)) : undefined;
+        return { vehicleId: v.id, vehicle: v, driverId: driverId ?? '', driverName: driver?.name ?? '—' };
+      })
+      .filter((x) => x.driverId);
+  }, [assignedSite, vehicles, driverVehicleAssignments, users]);
+
+  const machinesWithDriver = useMemo(() => {
+    if (!assignedSite) return [];
+    const siteVehicles = vehicles.filter((v) => normalizeId(v.siteId) === normalizeId(assignedSite.id) && v.type === 'machine');
+    return siteVehicles
+      .map((v) => {
+        const assignment = driverVehicleAssignments.find(
+          (a) => normalizeId(a.siteId) === normalizeId(assignedSite.id) && (a.vehicleIds ?? []).includes(v.id)
+        );
+        const driverId = assignment?.driverId;
+        const driver = driverId ? users.find((u) => normalizeId(u.id) === normalizeId(driverId)) : undefined;
+        return { vehicleId: v.id, vehicle: v, driverId: driverId ?? '', driverName: driver?.name ?? '—' };
+      })
+      .filter((x) => x.driverId);
+  }, [assignedSite, vehicles, driverVehicleAssignments, users]);
 
   const teamAtSite = useMemo(() => {
     if (!assignedSite) return [];
@@ -120,6 +196,60 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
     if (tel) Linking.openURL(`tel:${tel}`);
   };
 
+  const saveAssignTrip = async () => {
+    if (!assignedSite || !assignVehicleId || !assignDriverId || !user?.id) return;
+    setAssignSaving(true);
+    try {
+      const status = getInitialStatusForVehicleType('truck');
+      const trip: AssignedTrip = {
+        id: generateId('at'),
+        siteId: assignedSite.id,
+        vehicleId: assignVehicleId,
+        driverId: assignDriverId,
+        vehicleType: 'truck',
+        taskType: assignTaskType.trim() || undefined,
+        notes: assignNotes.trim() || undefined,
+        status,
+        createdBy: user.id,
+        createdAt: new Date().toISOString(),
+      };
+      await addAssignedTrip(trip);
+      showToast(t('assigned_trip_assigned'));
+      setAssignTripModalVisible(false);
+    } catch (e) {
+      Alert.alert(t('alert_error'), (e as Error).message);
+    } finally {
+      setAssignSaving(false);
+    }
+  };
+
+  const saveAssignTask = async () => {
+    if (!assignedSite || !assignVehicleId || !assignDriverId || !user?.id) return;
+    setAssignSaving(true);
+    try {
+      const status = getInitialStatusForVehicleType('machine');
+      const task: AssignedTrip = {
+        id: generateId('at'),
+        siteId: assignedSite.id,
+        vehicleId: assignVehicleId,
+        driverId: assignDriverId,
+        vehicleType: 'machine',
+        taskType: assignTaskType.trim() || undefined,
+        notes: assignNotes.trim() || undefined,
+        status,
+        createdBy: user.id,
+        createdAt: new Date().toISOString(),
+      };
+      await addAssignedTrip(task);
+      showToast(t('assigned_task_assigned'));
+      setAssignTaskModalVisible(false);
+    } catch (e) {
+      Alert.alert(t('alert_error'), (e as Error).message);
+    } finally {
+      setAssignSaving(false);
+    }
+  };
+
   if (selectedTask) {
     return (
       <TaskDetailScreen
@@ -170,6 +300,15 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
                 <Text style={[styles.statLabel, isTablet && styles.statLabelTablet]}>{t('dashboard_spent')}</Text>
                 <Text style={[styles.statValue, isTablet && styles.statValueTablet]}>{formatAmount(assignedSite.spent ?? 0, true)}</Text>
               </View>
+            </View>
+
+            <View style={[styles.progressRow, isTablet && styles.progressRowTablet]}>
+              <View style={styles.progressLabelRow}>
+                <Percent size={16} color={colors.textSecondary} />
+                <Text style={[styles.progressLabel, isTablet && styles.progressLabelTablet]}>{t('site_card_progress')}</Text>
+                <Text style={[styles.progressValue, isTablet && styles.progressValueTablet]}>{Math.round(assignedSite.progress ?? 0)}%</Text>
+              </View>
+              <ProgressBar progress={assignedSite.progress ?? 0} showLabel={false} height={8} />
             </View>
           </Card>
         )}
@@ -234,15 +373,163 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('dashboard_tasks_at_site')}</Text>
           {siteTasks.length > 0 ? (
-            siteTasks.map((task) => (
-              <TaskCard key={task.id} task={task} onPress={() => setSelectedTask(task)} />
-            ))
+            siteTasks.map((task) => {
+              const pct = Math.max(1, Math.min(99, Math.round(task.progress ?? 0)));
+              return (
+                <Card key={task.id} style={styles.taskSummaryCard}>
+                  <View style={styles.taskSummaryHeader}>
+                    <Text style={styles.taskSummaryTitle}>{task.taskName}</Text>
+                    <Text style={styles.taskSummaryPct}>{pct}%</Text>
+                  </View>
+                  <Text style={styles.taskSummaryMeta}>Weight: {task.weight}% • {task.status.toUpperCase()}</Text>
+                  <View style={styles.taskSummaryBarWrap}>
+                    <View style={styles.taskSummaryBarTrack}>
+                      <View style={[styles.taskSummaryBarFill, { width: `${pct}%` }]} />
+                    </View>
+                  </View>
+                </Card>
+              );
+            })
           ) : (
             <Card style={styles.emptyCard}>
               <Text style={styles.emptyText}>{t('dashboard_no_tasks_site')}</Text>
             </Card>
           )}
         </View>
+
+        {assignedSite && (
+          <>
+            <View style={styles.section}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>{t('assigned_trips_trucks')}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setAssignVehicleId(trucksWithDriver[0]?.vehicleId ?? '');
+                    setAssignDriverId(trucksWithDriver[0]?.driverId ?? '');
+                    setAssignTaskType('');
+                    setAssignNotes('');
+                    setAssignTripModalVisible(true);
+                  }}
+                  style={styles.assignBtn}
+                  disabled={trucksWithDriver.length === 0}
+                >
+                  <Truck size={18} color="#fff" />
+                  <Text style={styles.assignBtnText}>{t('assigned_trip_assign_trip')}</Text>
+                </TouchableOpacity>
+              </View>
+              {siteTrips.length > 0 ? (
+                siteTrips.map((a) => {
+                  const vehicle = vehicles.find((v) => v.id === a.vehicleId);
+                  const driver = users.find((u) => u.id === a.driverId);
+                  const isNeedApproval = a.status === 'TRIP_NEED_APPROVAL';
+                  return (
+                    <Card key={a.id} style={styles.assignedCard}>
+                      <View style={styles.assignedRow}>
+                        <View style={styles.assignedBody}>
+                          <Text style={styles.assignedVehicle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
+                          <Text style={styles.assignedMeta}>{driver?.name ?? a.driverId} • {a.taskType || '—'}</Text>
+                          <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }]}>
+                            <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }]}>
+                              {ASSIGNED_TRIP_STATUS_LABELS[a.status]}
+                            </Text>
+                          </View>
+                        </View>
+                        {isNeedApproval && (
+                          <TouchableOpacity
+                            onPress={async () => {
+                              const next = getCompletedStatus(a.status);
+                              if (next) {
+                                try {
+                                  await updateAssignedTripStatus(a.id, next);
+                                  showToast(t('assigned_trip_confirmed'));
+                                } catch (e) {
+                                  Alert.alert(t('alert_error'), (e as Error).message);
+                                }
+                              }
+                            }}
+                            style={styles.confirmBtn}
+                          >
+                            <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </Card>
+                  );
+                })
+              ) : (
+                <Card style={styles.emptyCard}>
+                  <Truck size={28} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>{t('assigned_trips_no_trips')}</Text>
+                </Card>
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>{t('assigned_tasks_machines')}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setAssignVehicleId(machinesWithDriver[0]?.vehicleId ?? '');
+                    setAssignDriverId(machinesWithDriver[0]?.driverId ?? '');
+                    setAssignTaskType('');
+                    setAssignNotes('');
+                    setAssignTaskModalVisible(true);
+                  }}
+                  style={[styles.assignBtn, { backgroundColor: '#7c3aed' }]}
+                  disabled={machinesWithDriver.length === 0}
+                >
+                  <Wrench size={18} color="#fff" />
+                  <Text style={styles.assignBtnText}>{t('assigned_task_assign_task')}</Text>
+                </TouchableOpacity>
+              </View>
+              {siteAssignedTasks.length > 0 ? (
+                siteAssignedTasks.map((a) => {
+                  const vehicle = vehicles.find((v) => v.id === a.vehicleId);
+                  const driver = users.find((u) => u.id === a.driverId);
+                  const isNeedApproval = a.status === 'TASK_NEED_APPROVAL';
+                  return (
+                    <Card key={a.id} style={styles.assignedCard}>
+                      <View style={styles.assignedRow}>
+                        <View style={styles.assignedBody}>
+                          <Text style={styles.assignedVehicle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
+                          <Text style={styles.assignedMeta}>{driver?.name ?? a.driverId} • {a.taskType || '—'}</Text>
+                          <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }]}>
+                            <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }]}>
+                              {ASSIGNED_TRIP_STATUS_LABELS[a.status]}
+                            </Text>
+                          </View>
+                        </View>
+                        {isNeedApproval && (
+                          <TouchableOpacity
+                            onPress={async () => {
+                              const next = getCompletedStatus(a.status);
+                              if (next) {
+                                try {
+                                  await updateAssignedTripStatus(a.id, next);
+                                  showToast(t('assigned_trip_confirmed'));
+                                } catch (e) {
+                                  Alert.alert(t('alert_error'), (e as Error).message);
+                                }
+                              }
+                            }}
+                            style={styles.confirmBtn}
+                          >
+                            <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </Card>
+                  );
+                })
+              ) : (
+                <Card style={styles.emptyCard}>
+                  <Wrench size={28} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>{t('assigned_tasks_no_tasks')}</Text>
+                </Card>
+              )}
+            </View>
+          </>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('dashboard_quick_actions')}</Text>
@@ -300,6 +587,73 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={assignTripModalVisible} transparent animationType="fade">
+        <Pressable style={styles.modalOverlay} onPress={() => setAssignTripModalVisible(false)}>
+          <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>{t('assigned_trip_assign_trip')}</Text>
+            <Text style={styles.modalHint}>{t('assigned_trip_vehicle')}</Text>
+            <View style={styles.pickerWrap}>
+              {trucksWithDriver.map((x) => (
+                <TouchableOpacity
+                  key={x.vehicleId}
+                  onPress={() => { setAssignVehicleId(x.vehicleId); setAssignDriverId(x.driverId); }}
+                  style={[styles.pickerItem, assignVehicleId === x.vehicleId && styles.pickerItemActive]}
+                >
+                  <Text style={styles.pickerItemText}>{x.vehicle.vehicleNumberOrId}</Text>
+                  <Text style={styles.pickerItemSub}>{x.driverName}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.modalHint}>{t('assigned_trip_task_type')}</Text>
+            <TextInput style={styles.modalInput} value={assignTaskType} onChangeText={setAssignTaskType} placeholder={t('assigned_trip_task_type_placeholder')} placeholderTextColor={colors.textMuted} />
+            <Text style={styles.modalHint}>{t('assigned_trip_notes')}</Text>
+            <TextInput style={styles.modalInput} value={assignNotes} onChangeText={setAssignNotes} placeholder={t('assigned_trip_notes_placeholder')} placeholderTextColor={colors.textMuted} multiline />
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setAssignTripModalVisible(false)} style={styles.modalCancel}>
+                <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
+              </Pressable>
+              <Pressable onPress={saveAssignTrip} disabled={assignSaving || !assignVehicleId} style={styles.modalSave}>
+                <Text style={styles.modalSaveText}>{assignSaving ? '…' : t('common_save')}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={assignTaskModalVisible} transparent animationType="fade">
+        <Pressable style={styles.modalOverlay} onPress={() => setAssignTaskModalVisible(false)}>
+          <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>{t('assigned_task_assign_task')}</Text>
+            <Text style={styles.modalHint}>{t('assigned_trip_vehicle')}</Text>
+            <View style={styles.pickerWrap}>
+              {machinesWithDriver.map((x) => (
+                <TouchableOpacity
+                  key={x.vehicleId}
+                  onPress={() => { setAssignVehicleId(x.vehicleId); setAssignDriverId(x.driverId); }}
+                  style={[styles.pickerItem, assignVehicleId === x.vehicleId && styles.pickerItemActive]}
+                >
+                  <Text style={styles.pickerItemText}>{x.vehicle.vehicleNumberOrId}</Text>
+                  <Text style={styles.pickerItemSub}>{x.driverName}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.modalHint}>{t('assigned_trip_task_type')}</Text>
+            <TextInput style={styles.modalInput} value={assignTaskType} onChangeText={setAssignTaskType} placeholder={t('assigned_trip_task_type_placeholder')} placeholderTextColor={colors.textMuted} />
+            <Text style={styles.modalHint}>{t('assigned_trip_notes')}</Text>
+            <TextInput style={styles.modalInput} value={assignNotes} onChangeText={setAssignNotes} placeholder={t('assigned_trip_notes_placeholder')} placeholderTextColor={colors.textMuted} multiline />
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setAssignTaskModalVisible(false)} style={styles.modalCancel}>
+                <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
+              </Pressable>
+              <Pressable onPress={saveAssignTask} disabled={assignSaving || !assignVehicleId} style={styles.modalSave}>
+                <Text style={styles.modalSaveText}>{assignSaving ? '…' : t('common_save')}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
     </View>
   );
 }
@@ -318,6 +672,113 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.md,
     letterSpacing: 0.2,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  assignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  assignBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  assignedCard: {
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  assignedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  assignedBody: { flex: 1, minWidth: 0 },
+  assignedVehicle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  assignedMeta: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: radius.sm,
+    marginTop: 6,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  confirmBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  confirmBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  pickerWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  pickerItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  pickerItemActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.blue50,
+  },
+  pickerItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  pickerItemSub: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: spacing.md,
   },
   sectionLabel: {
     fontSize: 13,
@@ -434,6 +895,41 @@ const styles = StyleSheet.create({
   },
   siteStatsTablet: {
     paddingTop: spacing.lg,
+  },
+  progressRow: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  progressRowTablet: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  progressLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 6,
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  progressLabelTablet: {
+    fontSize: 13,
+  },
+  progressValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    marginLeft: 'auto',
+  },
+  progressValueTablet: {
+    fontSize: 16,
   },
   statBlock: {},
   statLabel: {
@@ -553,6 +1049,49 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.sm,
     textAlign: 'center',
+  },
+  taskSummaryCard: {
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  taskSummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  taskSummaryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  taskSummaryPct: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  taskSummaryMeta: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  taskSummaryBarWrap: {
+    marginTop: 2,
+  },
+  taskSummaryBarTrack: {
+    height: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.gray100,
+    overflow: 'hidden',
+  },
+  taskSummaryBarFill: {
+    height: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
   },
   actionCard: {
     marginBottom: spacing.sm,

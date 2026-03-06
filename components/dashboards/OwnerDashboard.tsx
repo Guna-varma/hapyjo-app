@@ -12,6 +12,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { TrendingUp, Banknote, PieChart, Settings, FileText, Building2, Users, Globe } from 'lucide-react-native';
 import { colors, layout, form } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
+import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 
 export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const { t, locale, setLocale } = useLocale();
@@ -22,6 +23,7 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
+  const [tasksSiteId, setTasksSiteId] = useState<string | null>(null);
 
   const inRange = useMemo(() => {
     if (!dateFrom && !dateTo) return () => true;
@@ -67,6 +69,18 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
       setRateSiteId(null);
     }
   };
+
+  const selectedSite = tasksSiteId ? sites.find((s) => s.id === tasksSiteId) ?? null : null;
+
+  if (selectedSite) {
+    return (
+      <SiteTasksScreen
+        initialSiteId={selectedSite.id}
+        readOnly
+        onBack={() => setTasksSiteId(null)}
+      />
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -230,10 +244,10 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
               </Card>
             </View>
 
-            <View style={ownerStyles.section}>
+                <View style={ownerStyles.section}>
               <Text style={ownerStyles.sectionTitle}>{t('dashboard_site_performance')}</Text>
               {sites.map((site) => (
-                <SiteCard key={site.id} site={site} />
+                    <SiteCard key={site.id} site={site} onPress={() => setTasksSiteId(site.id)} />
               ))}
             </View>
           </>

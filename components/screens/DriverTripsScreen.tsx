@@ -18,7 +18,8 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { generateId } from '@/lib/id';
-import { Play, Square, Fuel, MapPin, Camera } from 'lucide-react-native';
+import { Play, Square, Fuel, MapPin, Camera, Pause, PlayCircle, CheckCircle } from 'lucide-react-native';
+import { getNextDriverStatus, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import * as Linking from 'expo-linking';
 
 const LIVE_LOCATION_INTERVAL_MS = 20000;
@@ -58,6 +59,8 @@ export function DriverTripsScreen() {
     users,
     trips,
     machineSessions,
+    assignedTrips,
+    updateAssignedTripStatus,
     addTrip,
     updateTrip,
     addMachineSession,
@@ -392,6 +395,13 @@ export function DriverTripsScreen() {
     .filter((m) => m.status === 'completed')
     .reduce((s, m) => s + (m.fuelConsumed ?? 0), 0);
 
+  const myAssignedTrips = !isSupervisorView && userId
+    ? assignedTrips.filter((a) => a.driverId === userId && a.vehicleType === 'truck')
+    : [];
+  const myAssignedTasks = !isSupervisorView && userId
+    ? assignedTrips.filter((a) => a.driverId === userId && a.vehicleType === 'machine')
+    : [];
+
   const activeVehicleId = activeTrip?.vehicleId ?? activeSession?.vehicleId;
   const activeVehicle = activeVehicleId ? vehicles.find((v) => v.id === activeVehicleId) : null;
   const inProgressTripsForSupervisor = isSupervisorView
@@ -498,6 +508,95 @@ export function DriverTripsScreen() {
               </View>
             </View>
           </>
+        )}
+
+        {!isSupervisorView && (myAssignedTrips.length > 0 || myAssignedTasks.length > 0) && (
+          <View className="mb-4">
+            <Text className="text-sm font-semibold text-gray-700 mb-2">
+              {isTruck ? t('assigned_trips_my_trips') : t('assigned_tasks_my_tasks')}
+            </Text>
+            {(isTruck ? myAssignedTrips : myAssignedTasks).map((a) => {
+              const nextStatus = getNextDriverStatus(a.status);
+              const vehicleLabel = getVehicleLabel(a.vehicleId);
+              const siteName = getSiteName(a.siteId);
+              const canStart = a.status === 'TRIP_ASSIGNED' || a.status === 'TRIP_PENDING' || a.status === 'TASK_ASSIGNED' || a.status === 'TASK_PENDING';
+              const canPause = a.status === 'TRIP_STARTED' || a.status === 'TRIP_IN_PROGRESS' || a.status === 'TRIP_RESUMED' || a.status === 'TASK_STARTED' || a.status === 'TASK_IN_PROGRESS' || a.status === 'TASK_RESUMED';
+              const canResume = a.status === 'TRIP_PAUSED' || a.status === 'TASK_PAUSED';
+              const canComplete = a.status === 'TRIP_IN_PROGRESS' || a.status === 'TASK_IN_PROGRESS';
+              const isNeedApproval = a.status === 'TRIP_NEED_APPROVAL' || a.status === 'TASK_NEED_APPROVAL';
+              return (
+                <Card key={a.id} className="mb-2 border-l-4 border-l-blue-400">
+                  <View className="flex-row justify-between items-start mb-2">
+                    <View>
+                      <Text className="font-semibold text-gray-900">{vehicleLabel}</Text>
+                      <Text className="text-sm text-gray-600">{siteName} {a.taskType ? `· ${a.taskType}` : ''}</Text>
+                      <View className="mt-1 px-2 py-0.5 rounded self-start" style={{ backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }}>
+                        <Text className="text-xs font-semibold" style={{ color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }}>{ASSIGNED_TRIP_STATUS_LABELS[a.status]}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  {!isNeedApproval && (canStart || canPause || canResume || canComplete) && nextStatus && (
+                    <View className="flex-row flex-wrap gap-2">
+                      {canStart && (
+                        <TouchableOpacity
+                          onPress={async () => {
+                            try {
+                              await updateAssignedTripStatus(a.id, nextStatus);
+                              if (isTruck) {
+                                const v = vehicles.find((ve) => ve.id === a.vehicleId);
+                                const siteId = v?.siteId ?? sites[0]?.id;
+                                if (siteId && userId) addTrip({ id: generateId('t'), vehicleId: a.vehicleId, driverId: userId, siteId, startTime: new Date().toISOString(), distanceKm: 0, status: 'in_progress', createdAt: new Date().toISOString() });
+                              } else {
+                                const v = vehicles.find((ve) => ve.id === a.vehicleId);
+                                const siteId = v?.siteId ?? sites[0]?.id;
+                                if (siteId && userId) addMachineSession({ id: generateId('ms'), vehicleId: a.vehicleId, driverId: userId, siteId, startTime: new Date().toISOString(), status: 'in_progress', createdAt: new Date().toISOString() });
+                              }
+                            } catch (e) {
+                              Alert.alert(t('alert_error'), (e as Error).message);
+                            }
+                          }}
+                          className="bg-green-600 rounded-lg py-2 px-3 flex-row items-center"
+                        >
+                          <Play size={16} color="#fff" />
+                          <Text className="text-white font-semibold ml-2 text-sm">{t('driver_start_trip')}</Text>
+                        </TouchableOpacity>
+                      )}
+                      {canPause && (
+                        <TouchableOpacity
+                          onPress={async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }}
+                          className="bg-amber-500 rounded-lg py-2 px-3 flex-row items-center"
+                        >
+                          <Pause size={16} color="#fff" />
+                          <Text className="text-white font-semibold ml-2 text-sm">{t('assigned_trip_pause')}</Text>
+                        </TouchableOpacity>
+                      )}
+                      {canResume && (
+                        <TouchableOpacity
+                          onPress={async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }}
+                          className="bg-green-600 rounded-lg py-2 px-3 flex-row items-center"
+                        >
+                          <PlayCircle size={16} color="#fff" />
+                          <Text className="text-white font-semibold ml-2 text-sm">{t('assigned_trip_resume')}</Text>
+                        </TouchableOpacity>
+                      )}
+                      {canComplete && (
+                        <TouchableOpacity
+                          onPress={async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }}
+                          className="bg-blue-600 rounded-lg py-2 px-3 flex-row items-center"
+                        >
+                          <CheckCircle size={16} color="#fff" />
+                          <Text className="text-white font-semibold ml-2 text-sm">{t('assigned_trip_complete')}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                  {isNeedApproval && (
+                    <Text className="text-sm text-amber-700">{t('assigned_trip_wait_approval')}</Text>
+                  )}
+                </Card>
+              );
+            })}
+          </View>
         )}
 
         {isTruck ? (
