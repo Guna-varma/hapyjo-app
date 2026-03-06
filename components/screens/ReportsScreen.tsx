@@ -18,7 +18,6 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { formatAmount } from '@/lib/currency';
 import { canSeeFinancialSummary, isReportsReadOnly } from '@/lib/rbac';
-import { generateId } from '@/lib/id';
 import {
   FileText,
   TrendingUp,
@@ -32,11 +31,24 @@ import {
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** Format period "YYYY-MM" to "Mon YYYY" e.g. "Mar 2026" */
+/** Format period "YYYY-MM" to "Mon-YYYY" e.g. "Mar-2026" */
 function formatPeriodLabel(period: string): string {
   const [y, m] = period.split('-').map(Number);
   if (!y || !m) return period;
   return `${MONTH_LABELS[m - 1]}-${y}`;
+}
+
+const YYYY_MM = /^\d{4}-\d{2}$/;
+/** Normalize period to YYYY-MM so "This month" and "2026-03" are the same month. */
+function normalizePeriodToYYYYMM(period: string): string {
+  const p = (period || '').trim();
+  if (YYYY_MM.test(p)) return p;
+  const lower = p.toLowerCase();
+  if (lower === 'this month' || lower === 'this_month') {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return p;
 }
 
 function getReportsSubtitle(role: string | undefined, t: (key: string) => string): string {
@@ -45,6 +57,114 @@ function getReportsSubtitle(role: string | undefined, t: (key: string) => string
   if (role === 'head_supervisor') return t('reports_subtitle_head_supervisor');
   if (role === 'admin') return t('reports_subtitle_admin');
   return t('reports_title');
+}
+
+/** Group sites by start date month (YYYY-MM). */
+function getSitesGroupedByMonth(sites: { id: string; name: string; location: string; status: string; startDate: string; expectedEndDate?: string; budget: number; spent: number; progress: number }[]): Map<string, typeof sites> {
+  const map = new Map<string, typeof sites>();
+  sites.forEach((site) => {
+    const d = site.startDate?.slice(0, 7) || '';
+    if (!d) return;
+    const list = map.get(d) ?? [];
+    list.push(site);
+    map.set(d, list);
+  });
+  return map;
+}
+
+/** Group fuel expenses by month; return Map<YYYY-MM, { litres, cost }>. */
+function getFuelByMonth(expenses: { type: string; date: string; amountRwf?: number; litres?: number }[]): Map<string, { litres: number; cost: number }> {
+  const map = new Map<string, { litres: number; cost: number }>();
+  expenses.filter((e) => e.type === 'fuel' && e.date).forEach((e) => {
+    const ym = e.date.slice(0, 7);
+    const cur = map.get(ym) ?? { litres: 0, cost: 0 };
+    cur.litres += e.litres ?? 0;
+    cur.cost += e.amountRwf ?? 0;
+    map.set(ym, cur);
+  });
+  return map;
+}
+
+function daysRemaining(deadline: string | undefined): number | null {
+  if (!deadline) return null;
+  const end = new Date(deadline);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  return Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function SitePerformanceCard({
+  site,
+  formatAmount,
+  t,
+  reportCardStyles,
+  ownerStyles,
+}: {
+  site: { name: string; location: string; status: string; startDate: string; expectedEndDate?: string; budget: number; spent: number; progress: number; contractRateRwf?: number | null };
+  formatAmount: (n: number, compact?: boolean) => string;
+  t: (k: string) => string;
+  reportCardStyles: Record<string, object>;
+  ownerStyles: Record<string, object>;
+}) {
+  const days = daysRemaining(site.expectedEndDate);
+  const statusLabel = site.status === 'completed' ? t('reports_status_completed') : t('reports_status_in_progress');
+  const daysColor = days == null ? '#64748b' : days < 0 ? '#dc2626' : days <= 10 ? '#b45309' : '#059669';
+  const contractRate = site.contractRateRwf ?? 0;
+  return (
+    <Card style={reportCardStyles.siteCard}>
+      <View style={reportCardStyles.siteCardHeader}>
+        <TrendingUp size={18} color={colors.primary} />
+        <Text style={reportCardStyles.siteCardName}>{site.name}</Text>
+      </View>
+      <Text style={reportCardStyles.siteCardLocation}>{site.location}</Text>
+      <View style={reportCardStyles.siteCardRow}>
+        <Text style={reportCardStyles.siteCardLabel}>{t('site_card_progress')}</Text>
+        <Text style={reportCardStyles.siteCardValue}>{site.progress ?? 0}%</Text>
+      </View>
+      <View style={reportCardStyles.progressBarRow}>
+        <View style={reportCardStyles.progressBarTrack}>
+          <View style={[reportCardStyles.progressBarFill, { width: `${Math.min(100, site.progress ?? 0)}%` }]} />
+        </View>
+      </View>
+      <View style={reportCardStyles.siteCardRow}>
+        <Text style={reportCardStyles.siteCardLabel}>{t('reports_total_budget')}</Text>
+        <Text style={reportCardStyles.siteCardValue}>{formatAmount(site.budget ?? 0, true)}</Text>
+      </View>
+      <View style={reportCardStyles.siteCardRow}>
+        <Text style={reportCardStyles.siteCardLabel}>{t('reports_total_spent')}</Text>
+        <Text style={reportCardStyles.siteCardValue}>{formatAmount(site.spent ?? 0, true)}</Text>
+      </View>
+      <View style={reportCardStyles.siteCardRow}>
+        <Text style={reportCardStyles.siteCardLabel}>{t('reports_contract_rate_rwf_m3')}</Text>
+        <Text style={reportCardStyles.siteCardValue}>{contractRate > 0 ? `${contractRate.toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')}</Text>
+      </View>
+      {site.expectedEndDate && (
+        <View style={reportCardStyles.siteCardRow}>
+          <Text style={reportCardStyles.siteCardLabel}>{t('reports_days_remaining')}</Text>
+          <Text style={[reportCardStyles.siteCardValue, { color: daysColor }]}>
+            {days != null ? (days < 0 ? `${Math.abs(days)} overdue` : days) : '-'}
+          </Text>
+        </View>
+      )}
+      {site.startDate && (
+        <View style={reportCardStyles.siteCardRow}>
+          <Text style={reportCardStyles.siteCardLabel}>Start</Text>
+          <Text style={reportCardStyles.siteCardValue}>{site.startDate}</Text>
+        </View>
+      )}
+      {site.expectedEndDate && (
+        <View style={reportCardStyles.siteCardRow}>
+          <Text style={reportCardStyles.siteCardLabel}>Deadline</Text>
+          <Text style={reportCardStyles.siteCardValue}>{site.expectedEndDate}</Text>
+        </View>
+      )}
+      <View style={reportCardStyles.siteCardRow}>
+        <Text style={reportCardStyles.siteCardLabel}>Status</Text>
+        <Text style={reportCardStyles.siteCardValue}>{statusLabel}</Text>
+      </View>
+    </Card>
+  );
 }
 
 /** Escape a value for CSV (quotes and internal double-quotes). */
@@ -170,50 +290,62 @@ export function ReportsScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, vehicles, expenses, trips, machineSessions, surveys, reports, tasks, addReport, updateReport, refetch, loading } = useMockAppStore();
+  const { sites, vehicles, expenses, trips, machineSessions, surveys, reports, tasks, refetch, loading } = useMockAppStore();
   const [selectedType, setSelectedType] = useState<'all' | 'financial' | 'operations' | 'site_performance'>('all');
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('');
   const [monthDropdownVisible, setMonthDropdownVisible] = useState(false);
-  const [reportPeriod, setReportPeriod] = useState<'this_month' | 'last_month'>('this_month');
   const [fuelSiteId, setFuelSiteId] = useState<string | null>(null);
   const [fuelVehicleType, setFuelVehicleType] = useState<'all' | 'truck' | 'machine'>('all');
   const [fuelDateFrom, setFuelDateFrom] = useState('');
   const [fuelDateTo, setFuelDateTo] = useState('');
-  const [generating, setGenerating] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const readOnly = user ? isReportsReadOnly(user.role) : false;
   const showSummary = user ? canSeeFinancialSummary(user.role) : false;
-  const canGenerate = user ? ['admin', 'owner', 'head_supervisor', 'assistant_supervisor'].includes(user.role) : false;
+  const isOwnerLayout = user?.role === 'owner';
+  /** Same financial reports layout for Owner and Accountant: Financial Summary, site budgets, contract rates, expenses, Export/Share. */
+  const isFinancialReportsLayout = user?.role === 'owner' || user?.role === 'accountant';
+  const [selectedSiteForExpenseDetail, setSelectedSiteForExpenseDetail] = useState<typeof sites[0] | null>(null);
 
   // Tabs as data drivers: refetch when report type filter changes so list stays in sync (and future API can filter by type)
   useEffect(() => {
     refetch();
   }, [selectedType, refetch]);
 
-  const getPeriodForGenerate = (): string => {
-    const now = new Date();
-    if (reportPeriod === 'last_month') {
-      const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    }
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  };
 
-  const getMonthRange = (period: string): { start: string; end: string } => {
-    const [y, m] = period.split('-').map(Number);
-    const start = new Date(y, m - 1, 1);
-    const end = new Date(y, m, 0);
-    return {
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
-    };
-  };
+  // One financial report per month: normalize "This month" → current YYYY-MM and prefer YYYY-MM period.
+  const financialReportsByMonth = useMemo(() => {
+    const map = new Map<string, (typeof reports)[0]>();
+    reports.filter((r) => r.type === 'financial').forEach((r) => {
+      const norm = normalizePeriodToYYYYMM(r.period);
+      const existing = map.get(norm);
+      if (!existing || YYYY_MM.test(r.period)) map.set(norm, r);
+    });
+    return map;
+  }, [reports]);
+
+  const financialMonthOptions = useMemo(() => {
+    const periods = Array.from(financialReportsByMonth.keys()).filter((p) => YYYY_MM.test(p));
+    periods.sort((a, b) => b.localeCompare(a));
+    return periods.map((p) => ({ value: p, labelKey: formatPeriodLabel(p) }));
+  }, [financialReportsByMonth]);
+
+  const bannerMonth = selectedType === 'financial'
+    ? (selectedMonthFilter && financialMonthOptions.some((o) => o.value === selectedMonthFilter) ? selectedMonthFilter : financialMonthOptions[0]?.value ?? '')
+    : selectedMonthFilter;
+  const selectedBannerReport = selectedType === 'financial' && bannerMonth ? financialReportsByMonth.get(bannerMonth) : null;
 
   const filteredReports = useMemo(() => {
-    let list = selectedType === 'all' ? reports : reports.filter((r) => r.type === selectedType);
-    if (selectedMonthFilter) list = list.filter((r) => r.period === selectedMonthFilter);
+    let list: (typeof reports) = [];
+    if (selectedType === 'all') {
+      const oneFinancialPerMonth = Array.from(financialReportsByMonth.values());
+      const nonFinancial = reports.filter((r) => r.type !== 'financial');
+      list = [...oneFinancialPerMonth, ...nonFinancial].sort((a, b) => (b.generatedDate || b.period).localeCompare(a.generatedDate || a.period));
+    } else {
+      list = reports.filter((r) => r.type === selectedType);
+    }
+    if (selectedMonthFilter) list = list.filter((r) => normalizePeriodToYYYYMM(r.period) === selectedMonthFilter || r.period === selectedMonthFilter);
     return list;
-  }, [reports, selectedType, selectedMonthFilter]);
+  }, [reports, selectedType, selectedMonthFilter, financialReportsByMonth]);
 
   const monthOptions = useMemo(() => {
     const periods = Array.from(new Set(reports.map((r) => r.period).filter(Boolean)) as Set<string>);
@@ -270,6 +402,25 @@ export function ReportsScreen() {
   const vehiclesForFuel = fuelVehicleType === 'all'
     ? vehiclesBySite
     : vehiclesBySite.filter((v) => v.type === fuelVehicleType);
+  const vehicleIdsForFuelSet = useMemo(() => new Set(vehiclesForFuel.map((v) => v.id)), [vehiclesForFuel]);
+  const filteredFuelEntries = useMemo(() => {
+    return expenses
+      .filter((e) => e.type === 'fuel' && e.vehicleId && vehicleIdsForFuelSet.has(e.vehicleId) && inDateRange(e.date ?? ''))
+      .map((e) => {
+        const vehicle = vehicles.find((v) => v.id === e.vehicleId);
+        const site = sites.find((s) => s.id === (e.siteId ?? vehicle?.siteId));
+        return {
+          date: e.date ?? '',
+          vehicleId: e.vehicleId!,
+          vehicleName: vehicle?.vehicleNumberOrId ?? e.vehicleId,
+          assignedLocation: site?.name ?? (e.siteId ?? ''),
+          litres: e.litres ?? 0,
+          cost: e.amountRwf ?? 0,
+          description: e.description ?? '',
+        };
+      })
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [expenses, vehicleIdsForFuelSet, vehicles, sites, fuelDateFrom, fuelDateTo]);
   const tripsForFuel = trips.filter((t) => t.status === 'completed' && inDateRange(t.startTime));
   const sessionsForFuel = machineSessions.filter((m) => m.status === 'completed' && inDateRange(m.startTime));
 
@@ -293,172 +444,23 @@ export function ReportsScreen() {
   const totalSpentAll = sites.reduce((sum, s) => sum + (s.spent ?? 0), 0);
   const totalBudgetAll = sites.reduce((sum, s) => sum + (s.budget ?? 0), 0);
   const remainingBudgetAll = Math.max(0, totalBudgetAll - totalSpentAll);
+  const totalExpensesAll = expenses.reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
+  const totalMaintenanceAll = expenses
+    .filter((e) => e.expenseCategory === 'maintenance')
+    .reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
+  const revenueAll = surveys
+    .filter((s) => s.status === 'approved')
+    .reduce((sum, s) => {
+      const site = sites.find((x) => x.id === s.siteId);
+      return sum + (s.volumeM3 * (site?.contractRateRwf ?? 0));
+    }, 0);
+  const netProfitAll = revenueAll - totalExpensesAll;
 
   // Live data for Operations tab (not from saved reports)
   const activeSitesCount = sites.filter((s) => s.status === 'active').length;
   const completedTasksCount = tasks.filter((t) => t.status === 'completed').length;
   const pendingTasksCount = tasks.filter((t) => t.status === 'pending').length;
   const inProgressTasksCount = tasks.filter((t) => t.status === 'in_progress').length;
-
-  const handleGenerateReport = async () => {
-    if (!canGenerate) return;
-    const period = getPeriodForGenerate();
-    const existing = reports.find((r) => r.period === period && r.type === 'financial');
-    if (existing) {
-      setGenerating(true);
-      try {
-        const { start, end } = getMonthRange(period);
-        const inMonth = (iso: string) => {
-          const d = iso.slice(0, 10);
-          return d >= start && d <= end;
-        };
-        const tripsInMonth = trips.filter((t) => t.status === 'completed' && inMonth(t.startTime));
-        const sessionsInMonth = machineSessions.filter((m) => m.status === 'completed' && inMonth(m.startTime));
-        const expensesInMonth = expenses.filter((e) => e.date && inMonth(e.date));
-        const surveysInMonth = surveys.filter((s) => s.status === 'approved' && s.createdAt && inMonth(s.createdAt));
-        const revenueInMonth = surveysInMonth.reduce((sum, s) => {
-          const site = sites.find((site) => site.id === s.siteId);
-          return sum + (s.volumeM3 * (site?.contractRateRwf ?? 0));
-        }, 0);
-        const spentInMonth = expensesInMonth.reduce((s, e) => s + e.amountRwf, 0);
-        const fuelCostInMonth = expensesInMonth.filter((e) => e.type === 'fuel').reduce((s, e) => s + e.amountRwf, 0);
-        const sitesSummary = sites.map((site) => {
-          const siteSpent = site.spent ?? 0;
-          const siteBudget = site.budget ?? 0;
-          const siteRemaining = Math.max(0, siteBudget - siteSpent);
-          const utilizationPct = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
-          return { siteName: site.name, budget: siteBudget, spent: siteSpent, remaining: siteRemaining, utilizationPct };
-        });
-        const reportData = {
-          periodStart: start,
-          periodEnd: end,
-          trips: tripsInMonth.length,
-          machine_hours: Math.round(sessionsInMonth.reduce((a, m) => a + (m.durationHours ?? 0), 0) * 100) / 100,
-          fuel_cost: fuelCostInMonth,
-          expenses: spentInMonth,
-          revenue: revenueInMonth,
-          profit: revenueInMonth - spentInMonth,
-          totalBudget: totalBudgetAll,
-          totalSpent: totalSpentAll,
-          remainingBudget: remainingBudgetAll,
-          expenseCount: expensesInMonth.length,
-          sitesSummary,
-          generatedAt: new Date().toISOString(),
-        };
-        await updateReport(existing.id, {
-          data: reportData,
-          generatedDate: end,
-          title: `Financial Report ${period}`,
-        });
-        Alert.alert(t('reports_updated'), t('reports_updated_message'));
-      } catch (e) {
-        Alert.alert(t('alert_error'), e instanceof Error ? e.message : t('reports_report_failed'));
-      } finally {
-        setGenerating(false);
-      }
-      return;
-    }
-    setGenerating(true);
-    try {
-      const now = new Date();
-      const { start, end } = getMonthRange(period);
-      const inMonth = (iso: string) => {
-        const d = iso.slice(0, 10);
-        return d >= start && d <= end;
-      };
-      const tripsInMonth = trips.filter((t) => t.status === 'completed' && inMonth(t.startTime));
-      const sessionsInMonth = machineSessions.filter((m) => m.status === 'completed' && inMonth(m.startTime));
-      const expensesInMonth = expenses.filter((e) => e.date && inMonth(e.date));
-      const surveysInMonth = surveys.filter((s) => s.status === 'approved' && s.createdAt && inMonth(s.createdAt));
-      const revenueInMonth = surveysInMonth.reduce((sum, s) => {
-        const site = sites.find((site) => site.id === s.siteId);
-        return sum + (s.volumeM3 * (site?.contractRateRwf ?? 0));
-      }, 0);
-      const spentInMonth = expensesInMonth.reduce((s, e) => s + e.amountRwf, 0);
-      const fuelCostInMonth = expensesInMonth.filter((e) => e.type === 'fuel').reduce((s, e) => s + e.amountRwf, 0);
-      const sitesSummary = sites.map((site) => {
-        const siteSpent = site.spent ?? 0;
-        const siteBudget = site.budget ?? 0;
-        const siteRemaining = Math.max(0, siteBudget - siteSpent);
-        const utilizationPct = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
-        return { siteName: site.name, budget: siteBudget, spent: siteSpent, remaining: siteRemaining, utilizationPct };
-      });
-      const reportData = {
-        periodStart: start,
-        periodEnd: end,
-        trips: tripsInMonth.length,
-        machine_hours: Math.round(sessionsInMonth.reduce((a, m) => a + (m.durationHours ?? 0), 0) * 100) / 100,
-        fuel_cost: fuelCostInMonth,
-        expenses: spentInMonth,
-        revenue: revenueInMonth,
-        profit: revenueInMonth - spentInMonth,
-        totalBudget: totalBudgetAll,
-        totalSpent: totalSpentAll,
-        remainingBudget: remainingBudgetAll,
-        expenseCount: expensesInMonth.length,
-        sitesSummary,
-        generatedAt: now.toISOString(),
-      };
-      await addReport({
-        id: generateId('r'),
-        title: `Financial Report ${period}`,
-        type: 'financial',
-        generatedDate: end,
-        period,
-        data: reportData,
-      });
-      // Per-site expenses for the period (from expenses in month)
-      const sitesExpenses = sites.map((site) => {
-        const siteExpensesInMonth = expensesInMonth.filter((e) => e.siteId === site.id);
-        const totalExpenses = siteExpensesInMonth.reduce((s, e) => s + (e.amountRwf ?? 0), 0);
-        const fuelExpenses = siteExpensesInMonth.filter((e) => e.type === 'fuel').reduce((s, e) => s + (e.amountRwf ?? 0), 0);
-        const generalExpenses = siteExpensesInMonth.filter((e) => e.type === 'general').reduce((s, e) => s + (e.amountRwf ?? 0), 0);
-        return { siteId: site.id, siteName: site.name, totalExpenses, fuelExpenses, generalExpenses };
-      });
-      const sitesSummaryWithProgress = sites.map((site) => {
-        const siteSpent = site.spent ?? 0;
-        const siteBudget = site.budget ?? 0;
-        const siteRemaining = Math.max(0, siteBudget - siteSpent);
-        const utilizationPct = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
-        return { siteId: site.id, siteName: site.name, progress: site.progress ?? 0, budget: siteBudget, spent: siteSpent, remaining: siteRemaining, utilizationPct };
-      });
-      const existingSitePerf = reports.find((r) => r.period === period && r.type === 'site_performance');
-      if (!existingSitePerf) {
-        await addReport({
-          id: generateId('r'),
-          title: `Site Performance ${period}`,
-          type: 'site_performance',
-          generatedDate: end,
-          period,
-          data: {
-            periodStart: start,
-            periodEnd: end,
-            activeSites: sites.filter((s) => s.status === 'active').length,
-            sitesSummary: sitesSummaryWithProgress,
-            sitesExpenses,
-            generatedAt: now.toISOString(),
-          },
-        });
-      } else {
-        await updateReport(existingSitePerf.id, {
-          data: {
-            periodStart: start,
-            periodEnd: end,
-            activeSites: sites.filter((s) => s.status === 'active').length,
-            sitesSummary: sitesSummaryWithProgress,
-            sitesExpenses,
-            generatedAt: now.toISOString(),
-          },
-          generatedDate: end,
-        });
-      }
-      Alert.alert(t('reports_generated'), t('reports_generated_message'));
-    } catch (e) {
-      Alert.alert(t('alert_error'), e instanceof Error ? e.message : t('reports_generate_failed'));
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   const handleExportCSV = async (report: (typeof reports)[0]) => {
     if (!report.data || typeof report.data !== 'object') {
@@ -490,6 +492,241 @@ export function ReportsScreen() {
         // expo-sharing not available
       }
       if (!shareShown) {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
+    } catch (e) {
+      Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleExportSitePerformanceCSV = async (sitesList: typeof sites) => {
+    setExportingId('site-perf');
+    try {
+      const headers = ['site_name', 'location', 'status', 'start_date', 'deadline_date', 'days_remaining', 'budget', 'spent', 'progress', 'contract_rate_rwf_m3'];
+      const rows = sitesList.map((s) => [
+        csvEscape(s.name),
+        csvEscape(s.location ?? ''),
+        csvEscape(s.status),
+        csvEscape(s.startDate ?? ''),
+        csvEscape(s.expectedEndDate ?? ''),
+        csvEscape(daysRemaining(s.expectedEndDate) ?? ''),
+        csvEscape(s.budget ?? 0),
+        csvEscape(s.spent ?? 0),
+        csvEscape(s.progress ?? 0),
+        csvEscape((s.contractRateRwf ?? 0) > 0 ? String(s.contractRateRwf) : t('owner_contract_rate_not_set')),
+      ].join(','));
+      const csv = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+      const filename = `HapyJo_Site_Performance_${new Date().toISOString().slice(0, 10)}.csv`;
+      const dir = documentDirectory ?? cacheDirectory ?? '';
+      const path = `${dir}${filename}`;
+      await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
+      try {
+        const Sharing = await import('expo-sharing');
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: t('reports_export_download_share') });
+        } else {
+          Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+        }
+      } catch {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
+    } catch (e) {
+      Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleExportVehicleFuelReport = async () => {
+    setExportingId('vehicle-fuel');
+    try {
+      const siteLabel = fuelSiteId ? (sites.find((s) => s.id === fuelSiteId)?.name ?? fuelSiteId) : t('reports_all_sites');
+      const typeLabel = fuelVehicleType === 'all' ? t('vehicles_all') : fuelVehicleType === 'truck' ? t('vehicles_trucks') : t('vehicles_machines');
+      const dateRangeLabel = fuelDateFrom && fuelDateTo ? `${fuelDateFrom} to ${fuelDateTo}` : fuelDateFrom ? `${fuelDateFrom} onwards` : fuelDateTo ? `up to ${fuelDateTo}` : t('reports_all_months');
+      const rows: string[] = [
+        csvEscape('HapyJo – Vehicle Fuel Summary (filtered)'),
+        '',
+        [csvEscape('Filter'), csvEscape('Value')].join(','),
+        [csvEscape('Site'), csvEscape(siteLabel)].join(','),
+        [csvEscape('Vehicle type'), csvEscape(typeLabel)].join(','),
+        [csvEscape('Date range'), csvEscape(dateRangeLabel)].join(','),
+        '',
+        [csvEscape('Date'), csvEscape('Vehicle'), csvEscape('Assigned location'), csvEscape('Litres'), csvEscape('Cost (RWF)'), csvEscape('Description')].join(','),
+        ...filteredFuelEntries.map((e) =>
+          [csvEscape(e.date ?? ''), csvEscape(e.vehicleName ?? ''), csvEscape(e.assignedLocation ?? ''), csvEscape(e.litres), csvEscape(e.cost), csvEscape(e.description ?? '')].join(',')
+        ),
+        '',
+        csvEscape('Approx. fuel remaining in tank (L)'),
+        [csvEscape('Vehicle'), csvEscape(t('reports_remaining_l'))].join(','),
+        ...vehiclesForFuel.map((v) => [csvEscape(v.vehicleNumberOrId), csvEscape((v.fuelBalanceLitre ?? 0).toFixed(1))].join(',')),
+      ];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      const filename = `HapyJo_Vehicle_Fuel_${new Date().toISOString().slice(0, 10)}.csv`;
+      const dir = documentDirectory ?? cacheDirectory ?? '';
+      const path = `${dir}${filename}`;
+      await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
+      try {
+        const Sharing = await import('expo-sharing');
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: t('reports_export_download_share') });
+        } else {
+          Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+        }
+      } catch {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
+    } catch (e) {
+      Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleExportFinancialSummaryCSV = async () => {
+    setExportingId('financial-summary');
+    try {
+      const rows: string[] = [
+        csvEscape('HapyJo – Financial Summary'),
+        '',
+        [csvEscape('Metric'), csvEscape('Value (RWF)')].join(','),
+        [csvEscape(t('reports_total_budget')), csvEscape(formatAmount(totalBudgetAll, true))].join(','),
+        [csvEscape(t('reports_total_expenses')), csvEscape(formatAmount(totalExpensesAll, true))].join(','),
+        [csvEscape(t('reports_maintenance_cost')), csvEscape(formatAmount(totalMaintenanceAll, true))].join(','),
+        [csvEscape(t('reports_net_profit')), csvEscape(formatAmount(netProfitAll, true))].join(','),
+        '',
+        [csvEscape('Site'), csvEscape('Location'), csvEscape(t('reports_total_budget')), csvEscape(t('reports_total_spent')), csvEscape(t('reports_contract_rate_rwf_m3'))].join(','),
+        ...sites.map((s) => [
+          csvEscape(s.name ?? ''),
+          csvEscape(s.location ?? ''),
+          csvEscape(s.budget ?? 0),
+          csvEscape(s.spent ?? 0),
+          csvEscape((s.contractRateRwf ?? 0) > 0 ? `${(s.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')),
+        ].join(',')),
+      ];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      const filename = `HapyJo_Financial_Summary_${new Date().toISOString().slice(0, 10)}.csv`;
+      const dir = documentDirectory ?? cacheDirectory ?? '';
+      const path = `${dir}${filename}`;
+      await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
+      const Sharing = await import('expo-sharing');
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: t('reports_export_download_share') });
+      } else {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
+    } catch (e) {
+      Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleExportFuelSummaryCSV = async () => {
+    setExportingId('fuel-summary');
+    try {
+      const byMonth = getFuelByMonth(expenses);
+      const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
+      const rows: string[] = [
+        csvEscape('HapyJo – Fuel Summary (global by month)'),
+        '',
+        [csvEscape('Month'), csvEscape(t('reports_fuel_used')), csvEscape(t('reports_fuel_cost_month'))].join(','),
+        ...months.map((ym) => {
+          const row = byMonth.get(ym)!;
+          return [csvEscape(formatPeriodLabel(ym)), csvEscape(row.litres.toFixed(0) + ' L'), csvEscape(formatAmount(row.cost, true))].join(',');
+        }),
+      ];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      const filename = `HapyJo_Fuel_Summary_${new Date().toISOString().slice(0, 10)}.csv`;
+      const dir = documentDirectory ?? cacheDirectory ?? '';
+      const path = `${dir}${filename}`;
+      await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
+      const Sharing = await import('expo-sharing');
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: t('reports_export_download_share') });
+      } else {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
+    } catch (e) {
+      Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleExportSiteExpensesCSV = async () => {
+    setExportingId('site-expenses');
+    try {
+      const expenseCategoryLabel = (e: (typeof expenses)[0]) => e.type === 'fuel' ? t('expenses_category_fuel') : (e.expenseCategory ? t('expenses_category_' + e.expenseCategory) : t('expenses_category_other'));
+      const rows: string[] = [
+        csvEscape('HapyJo – Site Expense Reports'),
+        '',
+        [csvEscape('Site'), csvEscape('Location'), csvEscape(t('reports_total_site_expense')), csvEscape(t('reports_contract_rate_rwf_m3'))].join(','),
+        ...sites.map((s) => [
+          csvEscape(s.name ?? ''),
+          csvEscape(s.location ?? ''),
+          csvEscape(formatAmount(s.spent ?? 0, true)),
+          csvEscape((s.contractRateRwf ?? 0) > 0 ? `${(s.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')),
+        ].join(',')),
+        '',
+        [csvEscape('Date'), csvEscape('Site'), csvEscape('Category'), csvEscape('Amount (RWF)'), csvEscape('Description')].join(','),
+        ...expenses.map((e) => {
+          const siteName = sites.find((x) => x.id === e.siteId)?.name ?? '';
+          return [csvEscape(e.date ?? ''), csvEscape(siteName), csvEscape(expenseCategoryLabel(e)), csvEscape(e.amountRwf ?? 0), csvEscape(e.description ?? '')].join(',');
+        }),
+      ];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      const filename = `HapyJo_Site_Expenses_${new Date().toISOString().slice(0, 10)}.csv`;
+      const dir = documentDirectory ?? cacheDirectory ?? '';
+      const path = `${dir}${filename}`;
+      await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
+      const Sharing = await import('expo-sharing');
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: t('reports_export_download_share') });
+      } else {
+        Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
+      }
+    } catch (e) {
+      Alert.alert(t('reports_export_failed_title'), e instanceof Error ? e.message : t('reports_export_failed'));
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleExportSiteExpenseDetailCSV = async (site: typeof sites[0]) => {
+    setExportingId('site-expense-detail');
+    try {
+      const siteExpenses = expenses.filter((e) => e.siteId === site.id);
+      const total = siteExpenses.reduce((s, e) => s + (e.amountRwf ?? 0), 0);
+      const byMonth = new Map<string, typeof siteExpenses>();
+      siteExpenses.forEach((e) => {
+        const ym = e.date?.slice(0, 7) ?? '';
+        const list = byMonth.get(ym) ?? [];
+        list.push(e);
+        byMonth.set(ym, list);
+      });
+      const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
+      const expenseCategoryLabel = (e: (typeof expenses)[0]) => e.type === 'fuel' ? t('expenses_category_fuel') : (e.expenseCategory ? t('expenses_category_' + e.expenseCategory) : t('expenses_category_other'));
+      const rows: string[] = [
+        csvEscape('HapyJo – Site Expense Detail'),
+        csvEscape(site.name ?? ''),
+        csvEscape(site.location ?? ''),
+        [csvEscape(t('reports_contract_rate_rwf_m3')), csvEscape((site.contractRateRwf ?? 0) > 0 ? `${(site.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set'))].join(','),
+        [csvEscape(t('reports_total_site_expense')), csvEscape(formatAmount(total, true))].join(','),
+        '',
+        [csvEscape('Date'), csvEscape('Category'), csvEscape('Amount (RWF)'), csvEscape('Description')].join(','),
+        ...months.flatMap((ym) => (byMonth.get(ym) ?? []).map((e) => [csvEscape(e.date ?? ''), csvEscape(expenseCategoryLabel(e)), csvEscape(e.amountRwf ?? 0), csvEscape(e.description ?? '')].join(','))),
+      ];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      const filename = `HapyJo_Site_Expense_${(site.name ?? site.id).replace(/[^a-zA-Z0-9-_]/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
+      const dir = documentDirectory ?? cacheDirectory ?? '';
+      const path = `${dir}${filename}`;
+      await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
+      const Sharing = await import('expo-sharing');
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: t('reports_export_download_share') });
+      } else {
         Alert.alert(t('reports_exported'), `${t('reports_exported_path')} ${path}`);
       }
     } catch (e) {
@@ -555,6 +792,236 @@ export function ReportsScreen() {
           </Card>
         )}
 
+        {/* Financial reports layout (Owner & Accountant): Financial Summary, site budgets, contract rates, expenses, Export/Share */}
+        {isFinancialReportsLayout && (
+          <>
+            {(selectedType === 'all' || selectedType === 'financial') && (
+              <View className="mb-4">
+                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_financial_summary')}</Text>
+                <View style={ownerStyles.financialRow}>
+                  <Card style={ownerStyles.metricCard}>
+                    <Banknote size={20} color="#059669" />
+                    <Text style={ownerStyles.metricLabel}>{t('reports_total_budget')}</Text>
+                    <Text style={ownerStyles.metricValue}>{formatAmount(totalBudgetAll, true)}</Text>
+                  </Card>
+                  <Card style={ownerStyles.metricCard}>
+                    <TrendingUp size={20} color="#6366f1" />
+                    <Text style={ownerStyles.metricLabel}>{t('reports_total_expenses')}</Text>
+                    <Text style={ownerStyles.metricValue}>{formatAmount(totalExpensesAll, true)}</Text>
+                  </Card>
+                  <Card style={ownerStyles.metricCard}>
+                    <BarChart3 size={20} color="#b45309" />
+                    <Text style={ownerStyles.metricLabel}>{t('reports_maintenance_cost')}</Text>
+                    <Text style={ownerStyles.metricValue}>{formatAmount(totalMaintenanceAll, true)}</Text>
+                  </Card>
+                  <Card style={ownerStyles.metricCard}>
+                    <FileText size={20} color={netProfitAll >= 0 ? '#059669' : '#dc2626'} />
+                    <Text style={ownerStyles.metricLabel}>{t('reports_net_profit')}</Text>
+                    <Text style={[ownerStyles.metricValue, { color: netProfitAll >= 0 ? '#059669' : '#dc2626' }]}>{formatAmount(netProfitAll, true)}</Text>
+                  </Card>
+                </View>
+                <View style={ownerStyles.bannerActions}>
+                  <TouchableOpacity onPress={() => handleExportFinancialSummaryCSV()} disabled={exportingId === 'financial-summary'} style={ownerStyles.exportPrimaryBtn}>
+                    <Download size={18} color="#fff" />
+                    <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'financial-summary' ? t('reports_exporting') : t('reports_export_report')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleExportFinancialSummaryCSV()} disabled={exportingId === 'financial-summary'} style={ownerStyles.shareSecondaryBtn}>
+                    <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {selectedType === 'all' && (
+              <View className="mb-4">
+                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_available_categories')}</Text>
+                <View style={ownerStyles.categoryRow}>
+                  <TouchableOpacity onPress={() => setSelectedType('site_performance')} style={ownerStyles.categoryCard}>
+                    <TrendingUp size={22} color={colors.primary} />
+                    <Text style={ownerStyles.categoryLabel}>{t('reports_overall_site_perf')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setSelectedType('site_performance')} style={ownerStyles.categoryCard}>
+                    <BarChart3 size={22} color="#6366f1" />
+                    <Text style={ownerStyles.categoryLabel}>{t('reports_current_site_perf')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setSelectedType('financial')} style={ownerStyles.categoryCard}>
+                    <Fuel size={22} color="#3B82F6" />
+                    <Text style={ownerStyles.categoryLabel}>{t('reports_fuel_summary')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setSelectedType('financial')} style={ownerStyles.categoryCard}>
+                    <Banknote size={22} color="#059669" />
+                    <Text style={ownerStyles.categoryLabel}>{t('reports_site_expense_reports')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {(selectedType === 'all' || selectedType === 'operations' || selectedType === 'site_performance') && (
+              <View className="mb-4">
+                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_overall_site_perf')}</Text>
+                {(() => {
+                  const sitesByMonth = getSitesGroupedByMonth(sites);
+                  const months = Array.from(sitesByMonth.keys()).sort((a, b) => b.localeCompare(a));
+                  return (
+                    <>
+                      {months.map((ym) => (
+                        <View key={ym} style={ownerStyles.monthSection}>
+                          <Text style={ownerStyles.monthTitle}>{formatPeriodLabel(ym)}</Text>
+                          {(sitesByMonth.get(ym) ?? []).map((site) => (
+                            <SitePerformanceCard key={site.id} site={site} formatAmount={formatAmount} t={t} reportCardStyles={reportCardStyles} ownerStyles={ownerStyles} />
+                          ))}
+                        </View>
+                      ))}
+                      <TouchableOpacity onPress={() => handleExportSitePerformanceCSV(sites)} style={ownerStyles.exportReportBtn} disabled={exportingId === 'site-perf'}>
+                        <Download size={16} color="#2563eb" />
+                        <Text style={ownerStyles.exportReportBtnText}>{exportingId === 'site-perf' ? t('reports_exporting') : t('reports_export_report')}</Text>
+                      </TouchableOpacity>
+                    </>
+                  );
+                })()}
+                <Text style={[reportCardStyles.sectionTitleText, { marginTop: 20 }]} className="mb-3">{t('reports_current_site_perf')}</Text>
+                {sites.filter((s) => s.status === 'active').sort((a, b) => (a.expectedEndDate || '').localeCompare(b.expectedEndDate || '')).map((site) => (
+                  <SitePerformanceCard key={site.id} site={site} formatAmount={formatAmount} t={t} reportCardStyles={reportCardStyles} ownerStyles={ownerStyles} />
+                ))}
+              </View>
+            )}
+
+            {(selectedType === 'all' || selectedType === 'financial') && (
+              <View className="mb-4">
+                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_fuel_summary')}</Text>
+                <Text style={ownerStyles.mutedText} className="mb-2">{t('reports_fuel_summary_global_hint')}</Text>
+                <View style={ownerStyles.bannerActions}>
+                  <TouchableOpacity onPress={() => handleExportFuelSummaryCSV()} disabled={exportingId === 'fuel-summary'} style={ownerStyles.exportPrimaryBtn}>
+                    <Download size={18} color="#fff" />
+                    <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'fuel-summary' ? t('reports_exporting') : t('reports_export_report')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleExportFuelSummaryCSV()} disabled={exportingId === 'fuel-summary'} style={ownerStyles.shareSecondaryBtn}>
+                    <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                  </TouchableOpacity>
+                </View>
+                {(() => {
+                  const byMonth = getFuelByMonth(expenses);
+                  const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
+                  return months.length === 0 ? <Text style={ownerStyles.mutedText}>{t('reports_no_sites')}</Text> : months.map((ym) => {
+                    const row = byMonth.get(ym)!;
+                    return (
+                      <Card key={ym} style={ownerStyles.fuelMonthCard}>
+                        <Text style={ownerStyles.monthTitle}>{formatPeriodLabel(ym)}</Text>
+                        <View style={reportCardStyles.dataRow}>
+                          <Text style={reportCardStyles.dataLabel}>{t('reports_fuel_used')}</Text>
+                          <Text style={reportCardStyles.dataValue}>{row.litres.toFixed(0)} L</Text>
+                        </View>
+                        <View style={reportCardStyles.dataRow}>
+                          <Text style={reportCardStyles.dataLabel}>{t('reports_fuel_cost_month')}</Text>
+                          <Text style={reportCardStyles.dataValue}>{formatAmount(row.cost, true)}</Text>
+                        </View>
+                      </Card>
+                    );
+                  });
+                })()}
+              </View>
+            )}
+
+            {(selectedType === 'all' || selectedType === 'financial') && (
+              <View className="mb-4">
+                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_site_expense_reports')}</Text>
+                <View style={ownerStyles.bannerActions}>
+                  <TouchableOpacity onPress={() => handleExportSiteExpensesCSV()} disabled={exportingId === 'site-expenses'} style={ownerStyles.exportPrimaryBtn}>
+                    <Download size={18} color="#fff" />
+                    <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'site-expenses' ? t('reports_exporting') : t('reports_export_report')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleExportSiteExpensesCSV()} disabled={exportingId === 'site-expenses'} style={ownerStyles.shareSecondaryBtn}>
+                    <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                  </TouchableOpacity>
+                </View>
+                {sites.length === 0 ? (
+                  <EmptyState icon={<Banknote size={32} color={colors.textMuted} />} title={t('reports_no_sites')} message="" />
+                ) : (
+                  sites.map((site) => (
+                    <TouchableOpacity key={site.id} onPress={() => setSelectedSiteForExpenseDetail(site)} activeOpacity={0.7}>
+                      <Card style={reportCardStyles.siteCard}>
+                        <View style={reportCardStyles.siteCardHeader}>
+                          <Banknote size={18} color="#059669" />
+                          <Text style={reportCardStyles.siteCardName}>{site.name}</Text>
+                        </View>
+                        <Text style={reportCardStyles.siteCardLocation}>{site.location}</Text>
+                        <View style={reportCardStyles.siteCardRow}>
+                          <Text style={reportCardStyles.siteCardLabel}>{t('reports_total_site_expense')}</Text>
+                          <Text style={reportCardStyles.siteCardValue}>{formatAmount(site.spent ?? 0, true)}</Text>
+                        </View>
+                        <View style={reportCardStyles.siteCardRow}>
+                          <Text style={reportCardStyles.siteCardLabel}>{t('reports_contract_rate_rwf_m3')}</Text>
+                          <Text style={reportCardStyles.siteCardValue}>{(site.contractRateRwf ?? 0) > 0 ? `${(site.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')}</Text>
+                        </View>
+                      </Card>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+
+            <Modal visible={selectedSiteForExpenseDetail != null} animationType="slide" onRequestClose={() => setSelectedSiteForExpenseDetail(null)}>
+              {selectedSiteForExpenseDetail && (() => {
+                const siteExpenses = expenses.filter((e) => e.siteId === selectedSiteForExpenseDetail.id);
+                const total = siteExpenses.reduce((s, e) => s + (e.amountRwf ?? 0), 0);
+                const byMonth = new Map<string, typeof siteExpenses>();
+                siteExpenses.forEach((e) => {
+                  const ym = e.date?.slice(0, 7) ?? '';
+                  const list = byMonth.get(ym) ?? [];
+                  list.push(e);
+                  byMonth.set(ym, list);
+                });
+                const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
+                const expenseCategoryLabel = (e: (typeof expenses)[0]) => e.type === 'fuel' ? t('expenses_category_fuel') : (e.expenseCategory ? t('expenses_category_' + e.expenseCategory) : t('expenses_category_other'));
+                return (
+                  <View style={{ flex: 1, backgroundColor: colors.background }}>
+                    <Header title={selectedSiteForExpenseDetail.name} subtitle={t('reports_site_expense_detail')} leftAction={<TouchableOpacity onPress={() => setSelectedSiteForExpenseDetail(null)}><Text style={{ color: colors.primary, fontSize: 16 }}>{t('common_back')}</Text></TouchableOpacity>} />
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+                      <Card style={ownerStyles.metricCard}>
+                        <Text style={ownerStyles.metricLabel}>{t('reports_total_site_expense')}</Text>
+                        <Text style={ownerStyles.metricValue}>{formatAmount(total, true)}</Text>
+                      </Card>
+                      <View style={[ownerStyles.bannerActions, { marginTop: 12 }]}>
+                        <TouchableOpacity onPress={() => handleExportSiteExpenseDetailCSV(selectedSiteForExpenseDetail)} disabled={exportingId === 'site-expense-detail'} style={ownerStyles.exportPrimaryBtn}>
+                          <Download size={18} color="#fff" />
+                          <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'site-expense-detail' ? t('reports_exporting') : t('reports_export_report')}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleExportSiteExpenseDetailCSV(selectedSiteForExpenseDetail)} disabled={exportingId === 'site-expense-detail'} style={ownerStyles.shareSecondaryBtn}>
+                          <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {months.map((ym) => (
+                        <View key={ym} style={ownerStyles.monthSection}>
+                          <Text style={ownerStyles.monthTitle}>{formatPeriodLabel(ym)}</Text>
+                          {(byMonth.get(ym) ?? []).map((e) => (
+                            <View key={e.id} style={{ marginBottom: 6 }}>
+                              <View style={reportCardStyles.dataRow}>
+                                <Text style={reportCardStyles.dataLabel}>{expenseCategoryLabel(e)}</Text>
+                                <Text style={reportCardStyles.dataValue}>{formatAmount(e.amountRwf ?? 0, true)}</Text>
+                              </View>
+                              {e.description ? <Text style={[reportCardStyles.dataLabel, { fontSize: 12 }]} numberOfLines={2}>{e.description}</Text> : null}
+                              <Text style={[reportCardStyles.dataLabel, { fontSize: 11, color: '#94a3b8' }]}>{e.date}</Text>
+                            </View>
+                          ))}
+                          <View style={reportCardStyles.dataRow}>
+                            <Text style={reportCardStyles.dataLabel}>{t('reports_monthly_total')}</Text>
+                            <Text style={reportCardStyles.dataValue}>
+                              {formatAmount((byMonth.get(ym) ?? []).reduce((s, x) => s + (x.amountRwf ?? 0), 0), true)}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+                );
+              })()}
+            </Modal>
+          </>
+        )}
+
+        {/* Non–financial layout: Operations / Site performance / Financial tab for Admin, Head Supervisor */}
+        {!isFinancialReportsLayout && (
+        <View style={{ flex: 1 }}>
         {/* Live Operations summary – only when Operations tab selected */}
         {selectedType === 'operations' && (
           <View className="mb-4">
@@ -613,11 +1080,120 @@ export function ReportsScreen() {
           </View>
         )}
 
-        {/* Available Reports – at top; label varies by tab; month dropdown on the right */}
+        {/* Financial tab: single banner with month dropdown, summary, Export Excel, Share */}
+        {selectedType === 'financial' && (
+          <View className="mb-4">
+            {financialMonthOptions.length === 0 ? (
+              <EmptyState
+                icon={<Banknote size={32} color={colors.textMuted} />}
+                title={t('reports_no_financial_yet')}
+                message={t('reports_empty_financial_hint')}
+              />
+            ) : (
+              <Card style={reportCardStyles.bannerCard}>
+                <View style={reportCardStyles.bannerHeader}>
+                  <Text style={reportCardStyles.bannerTitle}>{t('reports_financial_summary')}</Text>
+                  <Pressable
+                    onPress={() => setMonthDropdownVisible(true)}
+                    style={reportCardStyles.monthDropdown}
+                    accessibilityLabel={t('reports_month_filter')}
+                    accessibilityRole="button"
+                  >
+                    <Text style={reportCardStyles.monthDropdownText}>
+                      {bannerMonth ? formatPeriodLabel(bannerMonth) : t('reports_all_months')}
+                    </Text>
+                    <ChevronDown size={18} color={colors.primary} />
+                  </Pressable>
+                </View>
+                <Modal
+                  visible={monthDropdownVisible}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setMonthDropdownVisible(false)}
+                >
+                  <Pressable style={reportCardStyles.monthModalOverlay} onPress={() => setMonthDropdownVisible(false)}>
+                    <View style={reportCardStyles.monthModalContent} onStartShouldSetResponder={() => true}>
+                      <Text style={reportCardStyles.monthModalTitle}>{t('reports_month_filter')}</Text>
+                      <FlatList
+                        data={financialMonthOptions}
+                        keyExtractor={(item) => item.value}
+                        renderItem={({ item }) => {
+                          const selected = item.value === bannerMonth;
+                          return (
+                            <Pressable
+                              onPress={() => {
+                                setSelectedMonthFilter(item.value);
+                                setMonthDropdownVisible(false);
+                              }}
+                              style={[reportCardStyles.monthOption, selected && reportCardStyles.monthOptionSelected]}
+                            >
+                              <Text style={[reportCardStyles.monthOptionText, selected && reportCardStyles.monthOptionTextSelected]}>{item.labelKey}</Text>
+                            </Pressable>
+                          );
+                        }}
+                      />
+                    </View>
+                  </Pressable>
+                </Modal>
+                {selectedBannerReport && (
+                  <View style={reportCardStyles.bannerSummary}>
+                    {(() => {
+                      const d = selectedBannerReport.data ?? {};
+                      const hasData = (Number(d.totalBudget) ?? 0) !== 0 || (Number(d.totalSpent) ?? 0) !== 0;
+                      const budget = hasData ? (Number(d.totalBudget) || 0) : totalBudgetAll;
+                      const spent = hasData ? (Number(d.totalSpent) || 0) : totalSpentAll;
+                      const remaining = hasData ? (Number(d.remainingBudget) ?? budget - spent) : remainingBudgetAll;
+                      return (
+                        <>
+                          <View style={reportCardStyles.dataRow}>
+                            <Text style={reportCardStyles.dataLabel}>{t('reports_total_budget')}</Text>
+                            <Text style={reportCardStyles.dataValue}>{formatAmount(budget, true)}</Text>
+                          </View>
+                          <View style={reportCardStyles.dataRow}>
+                            <Text style={reportCardStyles.dataLabel}>{t('reports_total_spent')}</Text>
+                            <Text style={reportCardStyles.dataValue}>{formatAmount(spent, true)}</Text>
+                          </View>
+                          <View style={reportCardStyles.dataRow}>
+                            <Text style={reportCardStyles.dataLabel}>{t('dashboard_remaining')}</Text>
+                            <Text style={[reportCardStyles.dataValue, reportCardStyles.dataValueGreen]}>{formatAmount(remaining, true)}</Text>
+                          </View>
+                        </>
+                      );
+                    })()}
+                  </View>
+                )}
+                {!readOnly && selectedBannerReport && (
+                  <View style={reportCardStyles.bannerActions}>
+                    <TouchableOpacity
+                      onPress={() => handleExportCSV(selectedBannerReport)}
+                      disabled={exportingId === selectedBannerReport.id}
+                      style={reportCardStyles.exportPrimaryBtn}
+                    >
+                      <Download size={18} color="#fff" />
+                      <Text style={reportCardStyles.exportPrimaryBtnText}>
+                        {exportingId === selectedBannerReport.id ? t('reports_exporting') : t('reports_export_excel')}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleExportCSV(selectedBannerReport)}
+                      disabled={exportingId === selectedBannerReport.id}
+                      style={reportCardStyles.shareSecondaryBtn}
+                    >
+                      <Text style={reportCardStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </Card>
+            )}
+          </View>
+        )}
+
+        {/* Available Reports – list (All / Operations / Site performance); month filter on the right */}
+        {selectedType !== 'financial' && (
         <View className="mb-4">
           <View style={reportCardStyles.sectionHeaderRow}>
             <Text style={reportCardStyles.sectionTitleText}>
-              {selectedType === 'all' ? t('reports_available') : selectedType === 'financial' ? t('reports_saved_financial') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
+              {selectedType === 'all' ? t('reports_available') : selectedType === 'operations' ? t('reports_saved_operations') : t('reports_saved_sites')}
             </Text>
             <Pressable
               onPress={() => setMonthDropdownVisible(true)}
@@ -666,7 +1242,7 @@ export function ReportsScreen() {
             <EmptyState
               icon={<FileText size={32} color={colors.textMuted} />}
               title={selectedType === 'all' ? t('reports_no_reports') : t('reports_no_reports_for_type')}
-              message={selectedType === 'financial' ? t('reports_empty_financial_hint') : selectedType === 'operations' ? t('reports_empty_operations_hint') : selectedType === 'site_performance' ? t('reports_empty_sites_hint') : t('reports_empty_hint')}
+              message={selectedType === 'operations' ? t('reports_empty_operations_hint') : selectedType === 'site_performance' ? t('reports_empty_sites_hint') : t('reports_empty_hint')}
             />
           ) : (
             filteredReports.map((report) => (
@@ -680,7 +1256,9 @@ export function ReportsScreen() {
                     <Text style={reportCardStyles.cardTitle} numberOfLines={2}>{report.title}</Text>
                   </View>
                   <View style={reportCardStyles.badge}>
-                    <Text style={reportCardStyles.badgeText}>{report.period}</Text>
+                    <Text style={reportCardStyles.badgeText}>
+                      {report.type === 'financial' && YYYY_MM.test(report.period) ? formatPeriodLabel(report.period) : report.type === 'financial' ? formatPeriodLabel(normalizePeriodToYYYYMM(report.period)) : report.period}
+                    </Text>
                   </View>
                 </View>
                 <Text style={reportCardStyles.typeLabel}>{report.type.replace('_', ' ')}</Text>
@@ -814,6 +1392,9 @@ export function ReportsScreen() {
             ))
           )}
         </View>
+        )}
+        </View>
+        )}
 
         {/* Current site performance – live list so all sites (e.g. Demo 25%) show in Reports */}
         {(selectedType === 'all' || selectedType === 'financial') && showSummary && sites.length > 0 && (
@@ -887,7 +1468,7 @@ export function ReportsScreen() {
           </View>
         ) : null}
 
-        {/* Vehicle Fuel Summary – only when All or Financial tab */}
+        {/* Vehicle Fuel Summary – All or Financial tab, with filters; Export & Share (Owner and others) */}
         {(selectedType === 'all' || selectedType === 'financial') && showSummary && (
           <View className="mb-4">
             <Text className="text-lg font-bold text-gray-900 mb-3">{t('reports_vehicle_fuel_title')}</Text>
@@ -976,6 +1557,45 @@ export function ReportsScreen() {
                 <Text className="text-slate-700 text-sm font-medium">{t('reports_clear_dates')}</Text>
               </TouchableOpacity>
             </View>
+            <Text className="text-xs text-slate-500 mb-2">{t('reports_vehicle_fuel_filter_hint')}</Text>
+            <View style={ownerStyles.bannerActions}>
+              <TouchableOpacity
+                onPress={() => handleExportVehicleFuelReport()}
+                disabled={exportingId === 'vehicle-fuel'}
+                style={ownerStyles.exportPrimaryBtn}
+              >
+                <Download size={18} color="#fff" />
+                <Text style={ownerStyles.exportPrimaryBtnText}>
+                  {exportingId === 'vehicle-fuel' ? t('reports_exporting') : t('reports_export_report')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleExportVehicleFuelReport()}
+                disabled={exportingId === 'vehicle-fuel'}
+                style={ownerStyles.shareSecondaryBtn}
+              >
+                <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+              </TouchableOpacity>
+            </View>
+            {filteredFuelEntries.length > 0 && (
+              <View className="mb-3">
+                <Text className="text-sm font-semibold text-slate-700 mb-2">{t('reports_vehicle_fuel_entries_title')}</Text>
+                <Card style={{ padding: 12, marginBottom: 8 }}>
+                  {filteredFuelEntries.slice(0, 30).map((e, idx) => (
+                    <View key={`${e.date}-${e.vehicleId}-${idx}`} style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6, borderBottomWidth: idx < Math.min(30, filteredFuelEntries.length) - 1 ? 1 : 0, borderBottomColor: '#f1f5f9', paddingBottom: 6 }}>
+                      <Text style={{ fontSize: 12, color: '#64748b', width: '22%' }}>{e.date}</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#334155', width: '20%' }} numberOfLines={1}>{e.vehicleName}</Text>
+                      <Text style={{ fontSize: 12, color: '#475569', width: '28%' }} numberOfLines={1}>{e.assignedLocation}</Text>
+                      <Text style={{ fontSize: 12, color: '#1e293b' }}>{e.litres} L</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#1e293b' }}>{formatAmount(e.cost, true)}</Text>
+                    </View>
+                  ))}
+                  {filteredFuelEntries.length > 30 && (
+                    <Text style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{filteredFuelEntries.length - 30} {t('reports_vehicle_fuel_entries_more')}</Text>
+                  )}
+                </Card>
+              </View>
+            )}
             {vehiclesForFuel.length === 0 ? (
               <EmptyState
                 icon={<Fuel size={32} color={colors.textMuted} />}
@@ -1038,39 +1658,6 @@ export function ReportsScreen() {
           </View>
         )}
 
-        {/* Generate Report – Owner / Admin / Head Supervisor */}
-        {canGenerate && (
-          <Card className="bg-blue-50 mb-4">
-            <View className="py-2">
-            <Text className="text-base font-bold text-gray-900 mb-2">{t('reports_generate')}</Text>
-            <Text className="text-sm text-gray-600 mb-2">
-                {t('reports_generate_hint')}
-              </Text>
-              <Text className="text-xs text-gray-600 mb-2">{t('reports_period')}</Text>
-              <View className="flex-row gap-2 mb-4">
-                <TouchableOpacity
-                  onPress={() => setReportPeriod('this_month')}
-                  className={`flex-1 py-2.5 rounded-lg ${reportPeriod === 'this_month' ? 'bg-blue-600' : 'bg-white border border-gray-300'}`}
-                >
-                  <Text className={`text-center font-medium ${reportPeriod === 'this_month' ? 'text-white' : 'text-gray-700'}`}>
-                    {t('users_period_this_month')}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setReportPeriod('last_month')}
-                  className={`flex-1 py-2.5 rounded-lg ${reportPeriod === 'last_month' ? 'bg-blue-600' : 'bg-white border border-gray-300'}`}
-                >
-                  <Text className={`text-center font-medium ${reportPeriod === 'last_month' ? 'text-white' : 'text-gray-700'}`}>
-                    {t('users_period_last_month')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <Button onPress={handleGenerateReport} disabled={generating}>
-                {generating ? t('reports_generating') : t('reports_generate')}
-              </Button>
-            </View>
-          </Card>
-        )}
           </>
         )}
       </ScrollView>
@@ -1143,6 +1730,67 @@ const reportCardStyles = StyleSheet.create({
   monthOptionTextSelected: {
     color: '#1d4ed8',
     fontWeight: '600',
+  },
+  bannerCard: {
+    marginBottom: 16,
+    overflow: 'hidden',
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+  },
+  bannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  bannerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0c4a6e',
+  },
+  bannerSummary: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  bannerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  exportPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+  },
+  exportPrimaryBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  shareSecondaryBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2563eb',
+    backgroundColor: '#fff',
+  },
+  shareSecondaryBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2563eb',
   },
   card: {
     marginBottom: 16,
@@ -1344,4 +1992,118 @@ const reportCardStyles = StyleSheet.create({
   },
   siteCardLabel: { fontSize: 13, color: '#64748b' },
   siteCardValue: { fontSize: 13, fontWeight: '600', color: '#1e293b' },
+});
+
+const ownerStyles = StyleSheet.create({
+  financialRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  metricCard: {
+    flex: 1,
+    minWidth: '47%',
+    padding: 12,
+    alignItems: 'center',
+  },
+  metricLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  metricValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginTop: 2,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  categoryCard: {
+    flex: 1,
+    minWidth: '47%',
+    padding: 16,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+  },
+  categoryLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  monthSection: {
+    marginBottom: 16,
+  },
+  monthTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+  },
+  exportReportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
+  },
+  exportReportBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563eb',
+  },
+  fuelMonthCard: {
+    marginBottom: 12,
+    padding: 12,
+  },
+  mutedText: {
+    fontSize: 14,
+    color: '#94a3b8',
+  },
+  bannerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  exportPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+  },
+  exportPrimaryBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  shareSecondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  shareSecondaryBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
 });
