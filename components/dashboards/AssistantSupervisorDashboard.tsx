@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions, ScrollView, Platform, Linking } from 'react-native';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions, ScrollView, Platform, Linking, Image } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailScreen } from '@/components/tasks/TaskDetailScreen';
@@ -54,6 +54,8 @@ function getRemainingDays(expectedEndDate: string | undefined): number | null {
 }
 
 const TABLET_BREAKPOINT = 600;
+const MIN_ASSIGN_FUEL_L = 1;
+const LOW_FUEL_WARNING_L = 10;
 
 export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { width } = useWindowDimensions();
@@ -61,7 +63,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const { user } = useAuth();
   const { t } = useLocale();
   const { showToast } = useToast();
-  const { sites, surveys, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, trips, machineSessions, addAssignedTrip, updateAssignedTripStatus, updateAssignedTrip, updateTrip, updateMachineSession, updateUser } = useMockAppStore();
+  const { sites, surveys, siteTasks: siteTasksAll, siteAssignments, users, driverVehicleAssignments, vehicles, assignedTrips, trips, machineSessions, addAssignedTrip, updateAssignedTripStatus, updateAssignedTrip, approveAssignedTripReadings, cleanupExpiredAssignedTripEvidence, updateUser } = useMockAppStore();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editPhoneUserId, setEditPhoneUserId] = useState<string | null>(null);
   const [editPhoneValue, setEditPhoneValue] = useState('');
@@ -76,10 +78,12 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const [assignSaving, setAssignSaving] = useState(false);
   const [selectedAssignedForDetail, setSelectedAssignedForDetail] = useState<AssignedTrip | null>(null);
   const [detailNotes, setDetailNotes] = useState('');
-  const [detailDistance, setDetailDistance] = useState('');
-  const [detailFuel, setDetailFuel] = useState('');
+  const [detailStartReading, setDetailStartReading] = useState('');
+  const [detailEndReading, setDetailEndReading] = useState('');
+  const [detailManualFuel, setDetailManualFuel] = useState('');
   const [detailReviseMode, setDetailReviseMode] = useState(false);
   const [detailSubmitting, setDetailSubmitting] = useState(false);
+  const [tripPhotoPreview, setTripPhotoPreview] = useState<{ uri: string; label: string } | null>(null);
 
   const siteIds = user?.siteAccess ?? [];
   const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0] ?? null;
@@ -194,6 +198,135 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
     });
   }, [assignedSite, siteAssignments, users, driverVehicleAssignments, vehicles]);
 
+  const getCompletedTripForAssignment = useCallback(
+    (a: AssignedTrip): Trip | undefined => {
+      const byAssignment = trips
+        .filter((t) => t.status === 'completed' && t.assignedTripId && normalizeId(t.assignedTripId) === normalizeId(a.id))
+        .sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''));
+      if (byAssignment.length > 0) return byAssignment[0];
+      return trips
+        .filter((t) => t.status === 'completed' && normalizeId(t.vehicleId) === normalizeId(a.vehicleId) && normalizeId(t.driverId) === normalizeId(a.driverId))
+        .sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0];
+    },
+    [trips]
+  );
+
+  const getCompletedSessionForAssignment = useCallback(
+    (a: AssignedTrip) =>
+      machineSessions
+        .filter((m) => m.status === 'completed' && normalizeId(m.vehicleId) === normalizeId(a.vehicleId) && normalizeId(m.driverId) === normalizeId(a.driverId))
+        .sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0],
+    [machineSessions]
+  );
+
+  const openAssignedDetail = useCallback(
+    (a: AssignedTrip) => {
+      setSelectedAssignedForDetail(a);
+      setDetailNotes(a.notes ?? '');
+      setDetailReviseMode(false);
+      setDetailStartReading(a.startReading != null ? String(a.startReading) : '');
+      setDetailEndReading(a.endReading != null ? String(a.endReading) : '');
+      setDetailManualFuel(a.manualFuelOverrideL != null ? String(a.manualFuelOverrideL) : '');
+    },
+    []
+  );
+
+  const closeTripDetailModal = useCallback(() => {
+    setSelectedAssignedForDetail(null);
+    setDetailReviseMode(false);
+  }, []);
+
+  const selectedDetailContext = useMemo(() => {
+    if (!selectedAssignedForDetail) return null;
+    const a = selectedAssignedForDetail;
+    const vehicle = vehicles.find((v) => v.id === a.vehicleId);
+    const driver = users.find((u) => u.id === a.driverId);
+    const site = sites.find((s) => s.id === a.siteId);
+    const isTruck = a.vehicleType === 'truck';
+    const trip = isTruck ? getCompletedTripForAssignment(a) : undefined;
+    const session = !isTruck ? getCompletedSessionForAssignment(a) : undefined;
+    const startPhotoUri = trip?.startPhotoUri ?? a.startPhotoUrl ?? null;
+    const endPhotoUri = trip?.photoUri ?? a.endPhotoUrl ?? null;
+    const startGpsLat = trip?.startLat ?? a.startGpsLat ?? null;
+    const startGpsLng = trip?.startLon ?? a.startGpsLng ?? null;
+    const endGpsLat = trip?.endLat ?? a.endGpsLat ?? null;
+    const endGpsLng = trip?.endLon ?? a.endGpsLng ?? null;
+    const startedAt = trip?.startTime ?? session?.startTime ?? a.startedAt ?? null;
+    const endedAt = trip?.endTime ?? session?.endTime ?? a.endedAt ?? a.completedAt ?? null;
+    const distanceKm = trip?.distanceKm ?? a.distanceKm ?? 0;
+    const fuelUsed = trip?.fuelConsumed ?? session?.fuelConsumed ?? a.fuelUsedL ?? 0;
+    let durationHours = 0;
+    if (trip) durationHours = getEffectiveDurationHours(trip.startTime, trip.endTime ?? '', a.pauseSegments);
+    else if (session) durationHours = (session.durationHours ?? (session.endTime && session.startTime ? (new Date(session.endTime).getTime() - new Date(session.startTime).getTime()) / (1000 * 60 * 60) : 0));
+    return { a, vehicle, driver, site, isTruck, trip, session, startPhotoUri, endPhotoUri, startGpsLat, startGpsLng, endGpsLat, endGpsLng, startedAt, endedAt, distanceKm, fuelUsed, durationHours };
+  }, [getCompletedSessionForAssignment, getCompletedTripForAssignment, selectedAssignedForDetail, sites, users, vehicles]);
+
+  useEffect(() => {
+    cleanupExpiredAssignedTripEvidence().catch(() => {});
+  }, [cleanupExpiredAssignedTripEvidence]);
+
+  const openInGoogleMaps = useCallback((lat?: number | null, lng?: number | null) => {
+    if (lat == null || lng == null) return;
+    const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    Linking.openURL(url).catch(() => {});
+  }, []);
+
+  const detailCalc = useMemo(() => {
+    if (!selectedDetailContext?.vehicle) {
+      return { valid: false, message: 'Vehicle missing', usage: 0, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    if (!selectedDetailContext.startPhotoUri || !selectedDetailContext.endPhotoUri) {
+      return { valid: false, message: 'Start/end photos are required', usage: 0, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    if (
+      selectedDetailContext.startGpsLat == null ||
+      selectedDetailContext.startGpsLng == null ||
+      selectedDetailContext.endGpsLat == null ||
+      selectedDetailContext.endGpsLng == null
+    ) {
+      return { valid: false, message: 'Start/end GPS evidence is required', usage: 0, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    const start = parseFloat(detailStartReading);
+    const end = parseFloat(detailEndReading);
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+      return { valid: false, message: 'Enter valid readings', usage: 0, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    if (start < 0 || end < 0) {
+      return { valid: false, message: 'Readings must be non-negative', usage: 0, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    if (end < start) {
+      return { valid: false, message: 'End reading must be >= start reading', usage: 0, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    const usage = Math.round((end - start) * 100) / 100;
+    const vehicle = selectedDetailContext.vehicle;
+    const rate = Number(vehicle.fuelRate ?? 0);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      return { valid: false, message: 'Vehicle fuel rate is missing', usage, fuelUsed: 0, projectedFuel: null as number | null };
+    }
+    const calculatedFuel = selectedDetailContext.isTruck ? (usage / rate) : (usage * rate);
+    const manual = parseFloat(detailManualFuel);
+    const fuelUsed = !Number.isNaN(manual) && manual >= 0 ? manual : calculatedFuel;
+    const prevFuel = Number(selectedDetailContext.a.fuelUsedL ?? selectedDetailContext.fuelUsed ?? 0);
+    const projectedFuel = Number(vehicle.fuelBalanceLitre ?? 0) - (fuelUsed - prevFuel);
+    if (projectedFuel < 0) {
+      return { valid: false, message: 'Insufficient fuel balance for approval', usage, fuelUsed, projectedFuel };
+    }
+    return { valid: true, message: '', usage, fuelUsed, projectedFuel };
+  }, [detailEndReading, detailManualFuel, detailStartReading, selectedDetailContext]);
+
+  const getFuelStatus = useCallback((fuelBalanceLitre: number) => {
+    if (fuelBalanceLitre <= MIN_ASSIGN_FUEL_L) return 'empty' as const;
+    if (fuelBalanceLitre < LOW_FUEL_WARNING_L) return 'low' as const;
+    return 'ok' as const;
+  }, []);
+
+  const selectedAssignVehicle = useMemo(
+    () => vehicles.find((v) => v.id === assignVehicleId) ?? null,
+    [assignVehicleId, vehicles]
+  );
+  const selectedAssignFuelStatus = getFuelStatus(Number(selectedAssignVehicle?.fuelBalanceLitre ?? 0));
+  const selectedAssignBlocked = selectedAssignFuelStatus === 'empty';
+
   const openEditPhone = (member: { userId: string; phone: string | null }) => {
     setEditPhoneUserId(member.userId);
     setEditPhoneValue(member.phone ?? '');
@@ -220,6 +353,16 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
 
   const saveAssignTrip = async () => {
     if (!assignedSite || !assignVehicleId || !assignDriverId || !user?.id) return;
+    const vehicle = vehicles.find((v) => v.id === assignVehicleId);
+    if (!vehicle) return;
+    if (getFuelStatus(Number(vehicle.fuelBalanceLitre ?? 0)) === 'empty') {
+      Alert.alert(t('alert_error'), 'E No FUEL. Add fuel entry before assigning this vehicle.');
+      return;
+    }
+    if (vehicle.fuelMode !== 'km_per_l' || !(Number(vehicle.fuelRate ?? 0) > 0)) {
+      Alert.alert(t('alert_error'), 'Truck fuel specification is missing (fuel mode/rate). Update vehicle specs first.');
+      return;
+    }
     setAssignSaving(true);
     try {
       const status = getInitialStatusForVehicleType('truck');
@@ -247,6 +390,16 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
 
   const saveAssignTask = async () => {
     if (!assignedSite || !assignVehicleId || !assignDriverId || !user?.id) return;
+    const vehicle = vehicles.find((v) => v.id === assignVehicleId);
+    if (!vehicle) return;
+    if (getFuelStatus(Number(vehicle.fuelBalanceLitre ?? 0)) === 'empty') {
+      Alert.alert(t('alert_error'), 'E No FUEL. Add fuel entry before assigning this vehicle.');
+      return;
+    }
+    if (vehicle.fuelMode !== 'l_per_hour' || !(Number(vehicle.fuelRate ?? 0) > 0)) {
+      Alert.alert(t('alert_error'), 'Machine fuel specification is missing (fuel mode/rate). Update vehicle specs first.');
+      return;
+    }
     setAssignSaving(true);
     try {
       const status = getInitialStatusForVehicleType('machine');
@@ -445,57 +598,48 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
                   const driver = users.find((u) => u.id === a.driverId);
                   const isNeedApproval = a.status === 'TRIP_NEED_APPROVAL';
                   return (
-                    <Card key={a.id} style={styles.assignedCard}>
-                      <View style={styles.assignedRow}>
-                        <View style={styles.assignedBody}>
-                          <Text style={styles.assignedVehicle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
-                          <Text style={styles.assignedMeta}>{driver?.name ?? a.driverId} • {a.taskType || '—'}</Text>
-                          <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }]}>
-                            <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }]}>
-                              {ASSIGNED_TRIP_STATUS_LABELS[a.status]}
-                            </Text>
+                    <TouchableOpacity key={a.id} activeOpacity={0.85} onPress={() => openAssignedDetail(a)}>
+                      <Card style={styles.assignedCard}>
+                        <View style={styles.assignedRow}>
+                          <View style={styles.assignedBody}>
+                            <Text style={styles.assignedVehicle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
+                            <Text style={styles.assignedMeta}>{driver?.name ?? a.driverId} • {a.taskType || '—'}</Text>
+                            <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }]}>
+                              <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }]}>
+                                {ASSIGNED_TRIP_STATUS_LABELS[a.status]}
+                              </Text>
+                            </View>
                           </View>
-                        </View>
-                        {isNeedApproval && (
-                          <>
-                            <TouchableOpacity
-                              onPress={() => {
-                                setSelectedAssignedForDetail(a);
-                                setDetailNotes(a.notes ?? '');
-                                setDetailReviseMode(false);
-                                const isTruck = a.vehicleType === 'truck';
-                                const ct = trips.filter((t: Trip) => t.vehicleId === a.vehicleId && t.driverId === a.driverId && t.status === 'completed');
-                                const cs = machineSessions.filter((m) => m.vehicleId === a.vehicleId && m.driverId === a.driverId && m.status === 'completed');
-                                const tr = isTruck ? ct.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
-                                const sess = !isTruck ? cs.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
-                                setDetailDistance(tr ? String(tr.distanceKm ?? 0) : '');
-                                setDetailFuel(tr ? String(tr.fuelConsumed ?? 0) : (sess ? String(sess.fuelConsumed ?? 0) : ''));
-                              }}
-                              style={[styles.confirmBtn, { backgroundColor: colors.textSecondary, marginRight: 8 }]}
-                            >
-                              <FileText size={16} color="#fff" style={{ marginRight: 6 }} />
-                              <Text style={styles.confirmBtnText}>{t('assigned_trip_view_details')}</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={async () => {
-                                const next = getCompletedStatus(a.status);
-                                if (next) {
-                                  try {
-                                    await updateAssignedTripStatus(a.id, next);
-                                    showToast(t('assigned_trip_confirmed'));
-                                  } catch (e) {
-                                    Alert.alert(t('alert_error'), (e as Error).message);
+                          {isNeedApproval && (
+                            <>
+                              <TouchableOpacity
+                                onPress={() => openAssignedDetail(a)}
+                                style={[styles.confirmBtn, { backgroundColor: colors.textSecondary, marginRight: 8 }]}
+                              >
+                                <FileText size={16} color="#fff" style={{ marginRight: 6 }} />
+                                <Text style={styles.confirmBtnText}>{t('assigned_trip_view_details')}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={async () => {
+                                  const next = getCompletedStatus(a.status);
+                                  if (next) {
+                                    try {
+                                      await updateAssignedTripStatus(a.id, next);
+                                      showToast(t('assigned_trip_confirmed'));
+                                    } catch (e) {
+                                      Alert.alert(t('alert_error'), (e as Error).message);
+                                    }
                                   }
-                                }
-                              }}
-                              style={styles.confirmBtn}
-                            >
-                              <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
-                            </TouchableOpacity>
-                          </>
-                        )}
-                      </View>
-                    </Card>
+                                }}
+                                style={styles.confirmBtn}
+                              >
+                                <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
+                        </View>
+                      </Card>
+                    </TouchableOpacity>
                   );
                 })
               ) : (
@@ -530,57 +674,48 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
                   const driver = users.find((u) => u.id === a.driverId);
                   const isNeedApproval = a.status === 'TASK_NEED_APPROVAL';
                   return (
-                    <Card key={a.id} style={styles.assignedCard}>
-                      <View style={styles.assignedRow}>
-                        <View style={styles.assignedBody}>
-                          <Text style={styles.assignedVehicle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
-                          <Text style={styles.assignedMeta}>{driver?.name ?? a.driverId} • {a.taskType || '—'}</Text>
-                          <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }]}>
-                            <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }]}>
-                              {ASSIGNED_TRIP_STATUS_LABELS[a.status]}
-                            </Text>
+                    <TouchableOpacity key={a.id} activeOpacity={0.85} onPress={() => openAssignedDetail(a)}>
+                      <Card style={styles.assignedCard}>
+                        <View style={styles.assignedRow}>
+                          <View style={styles.assignedBody}>
+                            <Text style={styles.assignedVehicle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
+                            <Text style={styles.assignedMeta}>{driver?.name ?? a.driverId} • {a.taskType || '—'}</Text>
+                            <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[a.status] + '20' }]}>
+                              <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[a.status] }]}>
+                                {ASSIGNED_TRIP_STATUS_LABELS[a.status]}
+                              </Text>
+                            </View>
                           </View>
-                        </View>
-                        {isNeedApproval && (
-                          <>
-                            <TouchableOpacity
-                              onPress={() => {
-                                setSelectedAssignedForDetail(a);
-                                setDetailNotes(a.notes ?? '');
-                                setDetailReviseMode(false);
-                                const isTruck = a.vehicleType === 'truck';
-                                const ct = trips.filter((t: Trip) => t.vehicleId === a.vehicleId && t.driverId === a.driverId && t.status === 'completed');
-                                const cs = machineSessions.filter((m) => m.vehicleId === a.vehicleId && m.driverId === a.driverId && m.status === 'completed');
-                                const tr = isTruck ? ct.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
-                                const sess = !isTruck ? cs.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
-                                setDetailDistance(tr ? String(tr.distanceKm ?? 0) : '');
-                                setDetailFuel(tr ? String(tr.fuelConsumed ?? 0) : (sess ? String(sess.fuelConsumed ?? 0) : ''));
-                              }}
-                              style={[styles.confirmBtn, { backgroundColor: colors.textSecondary, marginRight: 8 }]}
-                            >
-                              <FileText size={16} color="#fff" style={{ marginRight: 6 }} />
-                              <Text style={styles.confirmBtnText}>{t('assigned_trip_view_details')}</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={async () => {
-                                const next = getCompletedStatus(a.status);
-                                if (next) {
-                                  try {
-                                    await updateAssignedTripStatus(a.id, next);
-                                    showToast(t('assigned_trip_confirmed'));
-                                  } catch (e) {
-                                    Alert.alert(t('alert_error'), (e as Error).message);
+                          {isNeedApproval && (
+                            <>
+                              <TouchableOpacity
+                                onPress={() => openAssignedDetail(a)}
+                                style={[styles.confirmBtn, { backgroundColor: colors.textSecondary, marginRight: 8 }]}
+                              >
+                                <FileText size={16} color="#fff" style={{ marginRight: 6 }} />
+                                <Text style={styles.confirmBtnText}>{t('assigned_trip_view_details')}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={async () => {
+                                  const next = getCompletedStatus(a.status);
+                                  if (next) {
+                                    try {
+                                      await updateAssignedTripStatus(a.id, next);
+                                      showToast(t('assigned_trip_confirmed'));
+                                    } catch (e) {
+                                      Alert.alert(t('alert_error'), (e as Error).message);
+                                    }
                                   }
-                                }
-                              }}
-                              style={styles.confirmBtn}
-                            >
-                              <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
-                            </TouchableOpacity>
-                          </>
-                        )}
-                      </View>
-                    </Card>
+                                }}
+                                style={styles.confirmBtn}
+                              >
+                                <Text style={styles.confirmBtnText}>{t('assigned_trip_confirm')}</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
+                        </View>
+                      </Card>
+                    </TouchableOpacity>
                   );
                 })
               ) : (
@@ -640,133 +775,207 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
         </View>
       </DashboardLayout>
 
-      <Modal visible={selectedAssignedForDetail != null} transparent animationType="fade">
-        <Pressable style={styles.modalOverlay} onPress={() => { setSelectedAssignedForDetail(null); setDetailReviseMode(false); }}>
-          <Pressable style={[styles.modalBox, { maxHeight: '85%' }]} onPress={(e) => e.stopPropagation()}>
-            <ScrollView style={{ maxHeight: '100%' }} showsVerticalScrollIndicator>
-              {selectedAssignedForDetail && (() => {
-                const a = selectedAssignedForDetail;
-                const vehicle = vehicles.find((v) => v.id === a.vehicleId);
-                const driver = users.find((u) => u.id === a.driverId);
-                const site = sites.find((s) => s.id === a.siteId);
-                const isTruck = a.vehicleType === 'truck';
-                const completedTripsForVehicleDriver = trips.filter((t: Trip) => t.vehicleId === a.vehicleId && t.driverId === a.driverId && t.status === 'completed');
-                const trip = isTruck ? completedTripsForVehicleDriver.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
-                const completedSessionsForVehicleDriver = machineSessions.filter((m) => m.vehicleId === a.vehicleId && m.driverId === a.driverId && m.status === 'completed');
-                const session = !isTruck ? completedSessionsForVehicleDriver.sort((x, y) => (y.endTime ?? '').localeCompare(x.endTime ?? ''))[0] : undefined;
-                let durationHours = 0;
-                if (trip) durationHours = getEffectiveDurationHours(trip.startTime, trip.endTime ?? '', a.pauseSegments);
-                else if (session) durationHours = (session.durationHours ?? (session.endTime && session.startTime ? (new Date(session.endTime).getTime() - new Date(session.startTime).getTime()) / (1000 * 60 * 60) : 0));
-                return (
-                  <>
-                    <Text style={styles.modalTitle}>{t('trip_detail_title')}</Text>
-                    <View style={{ marginBottom: spacing.md }}>
-                      <Text style={styles.modalHint}>{t('trip_detail_vehicle')}</Text>
-                      <Text style={styles.sectionTitle}>{vehicle?.vehicleNumberOrId ?? a.vehicleId}</Text>
-                    </View>
-                    <View style={{ marginBottom: spacing.md }}>
-                      <Text style={styles.modalHint}>{t('trip_detail_driver')}</Text>
-                      <Text style={styles.sectionTitle}>{driver?.name ?? a.driverId}</Text>
-                    </View>
-                    <View style={{ marginBottom: spacing.md }}>
-                      <Text style={styles.modalHint}>{t('trip_detail_site')}</Text>
-                      <Text style={styles.sectionTitle}>{site?.name ?? a.siteId}</Text>
-                    </View>
-                    {(trip || session) && (
-                      <>
-                        <View style={{ marginBottom: spacing.md }}>
-                          <Text style={styles.modalHint}>{t('trip_detail_start_time')}</Text>
-                          <Text style={styles.sectionTitle}>{(trip?.startTime ?? session?.startTime) ? new Date((trip?.startTime ?? session?.startTime) ?? '').toLocaleString() : '—'}</Text>
-                        </View>
-                        <View style={{ marginBottom: spacing.md }}>
-                          <Text style={styles.modalHint}>{t('trip_detail_end_time')}</Text>
-                          <Text style={styles.sectionTitle}>{(trip?.endTime ?? session?.endTime) ? new Date((trip?.endTime ?? session?.endTime) ?? '').toLocaleString() : '—'}</Text>
-                        </View>
-                        <View style={{ marginBottom: spacing.md }}>
-                          <Text style={styles.modalHint}>{t('trip_detail_duration')}</Text>
-                          <Text style={styles.sectionTitle}>{durationHours > 0 ? `${durationHours.toFixed(1)} h` : '—'}</Text>
-                        </View>
-                        {trip && (
-                          <>
-                            <View style={{ marginBottom: spacing.md }}>
-                              <Text style={styles.modalHint}>{t('trip_detail_distance')}</Text>
-                              {detailReviseMode ? (
-                                <TextInput style={styles.phoneInput} value={detailDistance} onChangeText={setDetailDistance} placeholder="km" keyboardType="decimal-pad" />
-                              ) : (
-                                <Text style={styles.sectionTitle}>{trip.distanceKm ?? 0} km</Text>
-                              )}
-                            </View>
-                            {trip.photoUri ? <Text style={[styles.modalHint, { marginBottom: 4 }]}>{t('driver_photo_attached')}</Text> : null}
-                          </>
+      <Modal visible={selectedAssignedForDetail != null} transparent animationType="fade" onRequestClose={closeTripDetailModal}>
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdropFill} onPress={closeTripDetailModal} />
+          {selectedDetailContext && (
+            <View style={[styles.tripDetailSheet, isTablet && styles.tripDetailSheetTablet]}>
+              <View style={styles.tripDetailHeader}>
+                <Text style={styles.tripDetailTitle}>{t('trip_detail_title')}</Text>
+                <Text style={styles.tripDetailSubtitle}>
+                  {(selectedDetailContext.vehicle?.vehicleNumberOrId ?? selectedDetailContext.a.vehicleId)} • {(selectedDetailContext.site?.name ?? selectedDetailContext.a.siteId)}
+                </Text>
+              </View>
+
+              <ScrollView
+                style={styles.tripDetailScroll}
+                contentContainerStyle={styles.tripDetailScrollContent}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                <View style={styles.tripDetailHero}>
+                  <View style={styles.tripDetailHeroTextWrap}>
+                    <Text style={styles.tripDetailHeroPrimary}>{selectedDetailContext.driver?.name ?? selectedDetailContext.a.driverId}</Text>
+                    <Text style={styles.tripDetailHeroSecondary}>{t('trip_detail_driver')}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: ASSIGNED_TRIP_STATUS_COLORS[selectedDetailContext.a.status] + '20' }]}>
+                    <Text style={[styles.statusBadgeText, { color: ASSIGNED_TRIP_STATUS_COLORS[selectedDetailContext.a.status] }]}>
+                      {ASSIGNED_TRIP_STATUS_LABELS[selectedDetailContext.a.status]}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{t('trip_detail_start_time')}</Text>
+                  <Text style={styles.tripMetricValue}>
+                    {selectedDetailContext.startedAt ? new Date(selectedDetailContext.startedAt).toLocaleString() : '—'}
+                  </Text>
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{t('trip_detail_end_time')}</Text>
+                  <Text style={styles.tripMetricValue}>
+                    {selectedDetailContext.endedAt ? new Date(selectedDetailContext.endedAt).toLocaleString() : '—'}
+                  </Text>
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{t('trip_detail_duration')}</Text>
+                  <Text style={styles.tripMetricValue}>{selectedDetailContext.durationHours > 0 ? `${selectedDetailContext.durationHours.toFixed(1)} h` : '—'}</Text>
+                </View>
+
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{selectedDetailContext.isTruck ? 'Before Odometer (km)' : 'Before Hour Meter'}</Text>
+                  <TextInput style={styles.tripMetricInput} value={detailStartReading} onChangeText={setDetailStartReading} placeholder="0" keyboardType="decimal-pad" />
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{selectedDetailContext.isTruck ? 'After Odometer (km)' : 'After Hour Meter'}</Text>
+                  <TextInput style={styles.tripMetricInput} value={detailEndReading} onChangeText={setDetailEndReading} placeholder="0" keyboardType="decimal-pad" />
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>Manual Fuel Override (L) - Optional</Text>
+                  <TextInput style={styles.tripMetricInput} value={detailManualFuel} onChangeText={setDetailManualFuel} placeholder="Auto from readings" keyboardType="decimal-pad" />
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{selectedDetailContext.isTruck ? 'Distance (km)' : 'Hours Used'}</Text>
+                  <Text style={styles.tripMetricValue}>{detailCalc.usage.toFixed(2)}</Text>
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>Fuel Used (L)</Text>
+                  <Text style={styles.tripMetricValue}>{detailCalc.fuelUsed.toFixed(2)}</Text>
+                </View>
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>Projected Fuel Balance (L)</Text>
+                  <Text style={styles.tripMetricValue}>{detailCalc.projectedFuel != null ? detailCalc.projectedFuel.toFixed(2) : '—'}</Text>
+                </View>
+
+                {selectedDetailContext.isTruck && (
+                  <View style={styles.tripMetricCard}>
+                    <Text style={styles.modalHint}>{t('trip_approval_photos')}</Text>
+                    <View style={styles.photoGrid}>
+                      <View style={styles.photoCell}>
+                        <Text style={styles.photoLabel}>{t('trip_approval_start_photo')}</Text>
+                        {selectedDetailContext.startPhotoUri ? (
+                          <TouchableOpacity onPress={() => setTripPhotoPreview({ uri: selectedDetailContext.startPhotoUri!, label: t('trip_approval_start_photo') })} activeOpacity={0.85}>
+                            <Image source={{ uri: selectedDetailContext.startPhotoUri }} style={styles.photoThumb} resizeMode="cover" />
+                          </TouchableOpacity>
+                        ) : (
+                          <View style={styles.photoPlaceholder}>
+                            <Text style={styles.photoPlaceholderText}>{t('trip_approval_no_photos')}</Text>
+                          </View>
                         )}
-                        <View style={{ marginBottom: spacing.md }}>
-                          <Text style={styles.modalHint}>{t('trip_detail_fuel')}</Text>
-                          {detailReviseMode ? (
-                            <TextInput style={styles.phoneInput} value={detailFuel} onChangeText={setDetailFuel} placeholder="L" keyboardType="decimal-pad" />
-                          ) : (
-                            <Text style={styles.sectionTitle}>{(trip?.fuelConsumed ?? session?.fuelConsumed ?? 0).toFixed(1)} L</Text>
-                          )}
-                        </View>
-                      </>
-                    )}
-                    <View style={{ marginBottom: spacing.md }}>
-                      <Text style={styles.modalHint}>{t('trip_detail_notes')}</Text>
-                      <TextInput
-                        style={[styles.phoneInput, { minHeight: 64 }]}
-                        value={detailNotes}
-                        onChangeText={setDetailNotes}
-                        placeholder={t('trip_detail_notes')}
-                        placeholderTextColor={colors.textMuted}
-                        editable={detailReviseMode}
-                        multiline
-                      />
+                      </View>
+                      <View style={styles.photoCell}>
+                        <Text style={styles.photoLabel}>{t('trip_approval_end_photo')}</Text>
+                        {selectedDetailContext.endPhotoUri ? (
+                          <TouchableOpacity onPress={() => setTripPhotoPreview({ uri: selectedDetailContext.endPhotoUri!, label: t('trip_approval_end_photo') })} activeOpacity={0.85}>
+                            <Image source={{ uri: selectedDetailContext.endPhotoUri }} style={styles.photoThumb} resizeMode="cover" />
+                          </TouchableOpacity>
+                        ) : (
+                          <View style={styles.photoPlaceholder}>
+                            <Text style={styles.photoPlaceholderText}>{t('trip_approval_no_photos')}</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                    <View style={styles.modalActions}>
-                      <Pressable onPress={() => setSelectedAssignedForDetail(null)} style={styles.modalCancel}>
-                        <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
-                      </Pressable>
-                      <TouchableOpacity onPress={() => setDetailReviseMode(!detailReviseMode)} style={[styles.modalCancel, { marginRight: 8 }]}>
-                        <Text style={styles.modalCancelText}>{t('trip_detail_revise')}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={async () => {
-                          if (!selectedAssignedForDetail) return;
-                          const a = selectedAssignedForDetail;
-                          setDetailSubmitting(true);
-                          try {
-                            if (trip) {
-                              const dist = parseFloat(detailDistance);
-                              if (!Number.isNaN(dist) && dist >= 0) await updateTrip(trip.id, { distanceKm: dist });
-                              const fuel = parseFloat(detailFuel);
-                              if (!Number.isNaN(fuel) && fuel >= 0) await updateTrip(trip.id, { fuelConsumed: fuel });
-                            } else if (session) {
-                              const fuel = parseFloat(detailFuel);
-                              if (!Number.isNaN(fuel) && fuel >= 0) await updateMachineSession(session.id, { fuelConsumed: fuel });
-                            }
-                            if (detailNotes !== (a.notes ?? '')) await updateAssignedTrip(a.id, { notes: detailNotes });
-                            const next = getCompletedStatus(a.status);
-                            if (next) {
-                              await updateAssignedTripStatus(a.id, next);
-                              showToast(t('assigned_trip_confirmed'));
-                            }
-                            setSelectedAssignedForDetail(null);
-                            setDetailReviseMode(false);
-                          } catch (e) {
-                            Alert.alert(t('alert_error'), (e as Error).message);
-                          } finally {
-                            setDetailSubmitting(false);
-                          }
-                        }}
-                        disabled={detailSubmitting}
-                        style={[styles.modalSave, { opacity: detailSubmitting ? 0.7 : 1 }]}
-                      >
-                        <Text style={styles.modalSaveText}>{detailSubmitting ? '…' : t('trip_detail_submit')}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                );
-              })()}
-            </ScrollView>
+                  </View>
+                )}
+
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>GPS Evidence</Text>
+                  <Text style={styles.tripMetricValue}>
+                    Start: {selectedDetailContext.startGpsLat != null && selectedDetailContext.startGpsLng != null ? `${selectedDetailContext.startGpsLat.toFixed(5)}, ${selectedDetailContext.startGpsLng.toFixed(5)}` : '—'}
+                  </Text>
+                  <Text style={[styles.tripMetricValue, { marginTop: 6 }]}>
+                    End: {selectedDetailContext.endGpsLat != null && selectedDetailContext.endGpsLng != null ? `${selectedDetailContext.endGpsLat.toFixed(5)}, ${selectedDetailContext.endGpsLng.toFixed(5)}` : '—'}
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                    <TouchableOpacity
+                      onPress={() => openInGoogleMaps(selectedDetailContext.startGpsLat, selectedDetailContext.startGpsLng)}
+                      disabled={selectedDetailContext.startGpsLat == null || selectedDetailContext.startGpsLng == null}
+                      style={[styles.modalCancel, selectedDetailContext.startGpsLat == null && { opacity: 0.4 }]}
+                    >
+                      <Text style={styles.modalCancelText}>Open Start in Maps</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => openInGoogleMaps(selectedDetailContext.endGpsLat, selectedDetailContext.endGpsLng)}
+                      disabled={selectedDetailContext.endGpsLat == null || selectedDetailContext.endGpsLng == null}
+                      style={[styles.modalCancel, selectedDetailContext.endGpsLat == null && { opacity: 0.4 }]}
+                    >
+                      <Text style={styles.modalCancelText}>Open End in Maps</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.tripMetricCard}>
+                  <Text style={styles.modalHint}>{t('trip_detail_notes')}</Text>
+                  <TextInput
+                    style={[styles.tripMetricInput, { minHeight: 82 }]}
+                    value={detailNotes}
+                    onChangeText={setDetailNotes}
+                    placeholder={t('trip_detail_notes')}
+                    placeholderTextColor={colors.textMuted}
+                    editable={detailReviseMode}
+                    multiline
+                  />
+                </View>
+              </ScrollView>
+
+              <View style={styles.tripDetailFooter}>
+                <Pressable onPress={closeTripDetailModal} style={styles.modalCancel}>
+                  <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
+                </Pressable>
+                <TouchableOpacity onPress={() => setDetailReviseMode(!detailReviseMode)} style={[styles.modalCancel, { marginRight: 8 }]}>
+                  <Text style={styles.modalCancelText}>{t('trip_detail_revise')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!selectedDetailContext) return;
+                    const { a } = selectedDetailContext;
+                    setDetailSubmitting(true);
+                    try {
+                      if (!detailCalc.valid) {
+                        Alert.alert(t('alert_error'), detailCalc.message);
+                        return;
+                      }
+                      await approveAssignedTripReadings({
+                        assignedTripId: a.id,
+                        startReading: parseFloat(detailStartReading),
+                        endReading: parseFloat(detailEndReading),
+                        validationNotes: detailNotes,
+                        manualFuelOverrideL: detailManualFuel.trim() ? parseFloat(detailManualFuel) : null,
+                        overrideReason: detailManualFuel.trim() ? 'Manual override by assistant supervisor' : null,
+                      });
+                      showToast(t('assigned_trip_confirmed'));
+                      closeTripDetailModal();
+                    } catch (e) {
+                      Alert.alert(t('alert_error'), (e as Error).message);
+                    } finally {
+                      setDetailSubmitting(false);
+                    }
+                  }}
+                  disabled={detailSubmitting || !detailCalc.valid}
+                  style={[styles.modalSave, { opacity: detailSubmitting ? 0.7 : 1 }]}
+                >
+                  <Text style={styles.modalSaveText}>{detailSubmitting ? '…' : t('trip_detail_submit')}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
+
+      <Modal visible={tripPhotoPreview != null} transparent animationType="fade" onRequestClose={() => setTripPhotoPreview(null)}>
+        <Pressable style={styles.photoPreviewOverlay} onPress={() => setTripPhotoPreview(null)}>
+          <Pressable style={styles.photoPreviewSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>{tripPhotoPreview?.label ?? t('driver_photo_attached')}</Text>
+            {tripPhotoPreview?.uri ? (
+              <Image source={{ uri: tripPhotoPreview.uri }} style={styles.photoPreviewImage} resizeMode="contain" />
+            ) : null}
+            <View style={[styles.modalActions, { marginTop: spacing.sm }]}>
+              <Pressable onPress={() => setTripPhotoPreview(null)} style={styles.modalCancel}>
+                <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
+              </Pressable>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -804,16 +1013,39 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
             <Text style={styles.modalHint}>{t('assigned_trip_vehicle')}</Text>
             <View style={styles.pickerWrap}>
               {trucksWithDriver.map((x) => (
+                (() => {
+                  const fuel = Number(x.vehicle.fuelBalanceLitre ?? 0);
+                  const fuelStatus = getFuelStatus(fuel);
+                  return (
                 <TouchableOpacity
                   key={x.vehicleId}
                   onPress={() => { setAssignVehicleId(x.vehicleId); setAssignDriverId(x.driverId); }}
-                  style={[styles.pickerItem, assignVehicleId === x.vehicleId && styles.pickerItemActive]}
+                  style={[
+                    styles.pickerItem,
+                    assignVehicleId === x.vehicleId && styles.pickerItemActive,
+                    fuelStatus === 'empty' && styles.pickerItemFuelEmpty,
+                    fuelStatus === 'low' && styles.pickerItemFuelLow,
+                  ]}
                 >
                   <Text style={styles.pickerItemText}>{x.vehicle.vehicleNumberOrId}</Text>
                   <Text style={styles.pickerItemSub}>{x.driverName}</Text>
+                  <Text style={styles.pickerFuelReadOnly}>Fuel: {fuel.toFixed(1)} L</Text>
+                  {fuelStatus === 'low' ? <Text style={styles.fuelLowText}>[!] Low fuel (below 10L)</Text> : null}
+                  {fuelStatus === 'empty' ? <Text style={styles.fuelEmptyText}>E No FUEL (0-1L). Assignment blocked.</Text> : null}
                 </TouchableOpacity>
+                  );
+                })()
               ))}
             </View>
+            {selectedAssignVehicle ? (
+              <Text style={[styles.assignFuelBanner, selectedAssignFuelStatus === 'empty' ? styles.fuelEmptyText : selectedAssignFuelStatus === 'low' ? styles.fuelLowText : styles.fuelOkText]}>
+                {selectedAssignFuelStatus === 'empty'
+                  ? 'E No FUEL. Please add fuel entry before assigning.'
+                  : selectedAssignFuelStatus === 'low'
+                    ? `Caution: ${Number(selectedAssignVehicle.fuelBalanceLitre ?? 0).toFixed(1)}L available (below 10L).`
+                    : `Fuel available: ${Number(selectedAssignVehicle.fuelBalanceLitre ?? 0).toFixed(1)}L`}
+              </Text>
+            ) : null}
             <Text style={styles.modalHint}>{t('assigned_trip_task_type')}</Text>
             <TextInput style={styles.modalInput} value={assignTaskType} onChangeText={setAssignTaskType} placeholder={t('assigned_trip_task_type_placeholder')} placeholderTextColor={colors.textMuted} />
             <Text style={styles.modalHint}>{t('assigned_trip_notes')}</Text>
@@ -822,7 +1054,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
               <Pressable onPress={() => setAssignTripModalVisible(false)} style={styles.modalCancel}>
                 <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
               </Pressable>
-              <Pressable onPress={saveAssignTrip} disabled={assignSaving || !assignVehicleId} style={styles.modalSave}>
+              <Pressable onPress={saveAssignTrip} disabled={assignSaving || !assignVehicleId || selectedAssignBlocked} style={[styles.modalSave, (assignSaving || !assignVehicleId || selectedAssignBlocked) && styles.modalSaveDisabled]}>
                 <Text style={styles.modalSaveText}>{assignSaving ? '…' : t('common_save')}</Text>
               </Pressable>
             </View>
@@ -837,16 +1069,39 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
             <Text style={styles.modalHint}>{t('assigned_trip_vehicle')}</Text>
             <View style={styles.pickerWrap}>
               {machinesWithDriver.map((x) => (
+                (() => {
+                  const fuel = Number(x.vehicle.fuelBalanceLitre ?? 0);
+                  const fuelStatus = getFuelStatus(fuel);
+                  return (
                 <TouchableOpacity
                   key={x.vehicleId}
                   onPress={() => { setAssignVehicleId(x.vehicleId); setAssignDriverId(x.driverId); }}
-                  style={[styles.pickerItem, assignVehicleId === x.vehicleId && styles.pickerItemActive]}
+                  style={[
+                    styles.pickerItem,
+                    assignVehicleId === x.vehicleId && styles.pickerItemActive,
+                    fuelStatus === 'empty' && styles.pickerItemFuelEmpty,
+                    fuelStatus === 'low' && styles.pickerItemFuelLow,
+                  ]}
                 >
                   <Text style={styles.pickerItemText}>{x.vehicle.vehicleNumberOrId}</Text>
                   <Text style={styles.pickerItemSub}>{x.driverName}</Text>
+                  <Text style={styles.pickerFuelReadOnly}>Fuel: {fuel.toFixed(1)} L</Text>
+                  {fuelStatus === 'low' ? <Text style={styles.fuelLowText}>[!] Low fuel (below 10L)</Text> : null}
+                  {fuelStatus === 'empty' ? <Text style={styles.fuelEmptyText}>E No FUEL (0-1L). Assignment blocked.</Text> : null}
                 </TouchableOpacity>
+                  );
+                })()
               ))}
             </View>
+            {selectedAssignVehicle ? (
+              <Text style={[styles.assignFuelBanner, selectedAssignFuelStatus === 'empty' ? styles.fuelEmptyText : selectedAssignFuelStatus === 'low' ? styles.fuelLowText : styles.fuelOkText]}>
+                {selectedAssignFuelStatus === 'empty'
+                  ? 'E No FUEL. Please add fuel entry before assigning.'
+                  : selectedAssignFuelStatus === 'low'
+                    ? `Caution: ${Number(selectedAssignVehicle.fuelBalanceLitre ?? 0).toFixed(1)}L available (below 10L).`
+                    : `Fuel available: ${Number(selectedAssignVehicle.fuelBalanceLitre ?? 0).toFixed(1)}L`}
+              </Text>
+            ) : null}
             <Text style={styles.modalHint}>{t('assigned_trip_task_type')}</Text>
             <TextInput style={styles.modalInput} value={assignTaskType} onChangeText={setAssignTaskType} placeholder={t('assigned_trip_task_type_placeholder')} placeholderTextColor={colors.textMuted} />
             <Text style={styles.modalHint}>{t('assigned_trip_notes')}</Text>
@@ -855,7 +1110,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
               <Pressable onPress={() => setAssignTaskModalVisible(false)} style={styles.modalCancel}>
                 <Text style={styles.modalCancelText}>{t('common_cancel')}</Text>
               </Pressable>
-              <Pressable onPress={saveAssignTask} disabled={assignSaving || !assignVehicleId} style={styles.modalSave}>
+              <Pressable onPress={saveAssignTask} disabled={assignSaving || !assignVehicleId || selectedAssignBlocked} style={[styles.modalSave, (assignSaving || !assignVehicleId || selectedAssignBlocked) && styles.modalSaveDisabled]}>
                 <Text style={styles.modalSaveText}>{assignSaving ? '…' : t('common_save')}</Text>
               </Pressable>
             </View>
@@ -1015,6 +1270,14 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: colors.blue50,
   },
+  pickerItemFuelLow: {
+    borderColor: '#F59E0B',
+    backgroundColor: '#FFFBEB',
+  },
+  pickerItemFuelEmpty: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
   pickerItemText: {
     fontSize: 14,
     fontWeight: '600',
@@ -1025,6 +1288,27 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  pickerFuelReadOnly: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  assignFuelBanner: {
+    marginTop: -4,
+    marginBottom: spacing.md,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  fuelLowText: {
+    color: '#B45309',
+  },
+  fuelEmptyText: {
+    color: '#B91C1C',
+  },
+  fuelOkText: {
+    color: '#047857',
+  },
   modalInput: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -1034,6 +1318,65 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
     marginBottom: spacing.md,
+  },
+  photoGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: 6,
+  },
+  photoCell: {
+    flex: 1,
+  },
+  photoLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  photoThumb: {
+    width: '100%',
+    height: 120,
+    borderRadius: radius.md,
+    backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  photoPlaceholder: {
+    width: '100%',
+    height: 120,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.gray50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  photoPlaceholderText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  photoPreviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  photoPreviewSheet: {
+    width: '100%',
+    maxWidth: 520,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  photoPreviewImage: {
+    width: '100%',
+    height: 360,
+    backgroundColor: colors.gray100,
+    borderRadius: radius.md,
   },
   sectionLabel: {
     fontSize: 13,
@@ -1380,6 +1723,114 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacing.lg,
   },
+  modalBackdropFill: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  tripDetailSheet: {
+    width: '100%',
+    maxWidth: 540,
+    height: '86%',
+    maxHeight: '90%',
+    minHeight: 440,
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  tripDetailSheetTablet: {
+    maxWidth: 680,
+  },
+  tripDetailHeader: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.gray50,
+  },
+  tripDetailTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: colors.text,
+    letterSpacing: 0.3,
+  },
+  tripDetailSubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  tripDetailScroll: {
+    flex: 1,
+    minHeight: 220,
+  },
+  tripDetailScrollContent: {
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+    gap: spacing.sm,
+  },
+  tripDetailHero: {
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    backgroundColor: '#eff6ff',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.sm,
+  },
+  tripDetailHeroTextWrap: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: spacing.sm,
+  },
+  tripDetailHeroPrimary: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  tripDetailHeroSecondary: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  tripMetricCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+  },
+  tripMetricValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.text,
+    marginTop: 2,
+  },
+  tripMetricInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    fontSize: 16,
+    color: colors.text,
+    marginTop: 4,
+    backgroundColor: colors.gray50,
+  },
+  tripDetailFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+  },
   modalBox: {
     width: '100%',
     maxWidth: 340,
@@ -1425,6 +1876,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
+  },
+  modalSaveDisabled: {
+    opacity: 0.5,
   },
   modalSaveText: {
     fontSize: 16,

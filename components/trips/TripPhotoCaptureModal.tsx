@@ -1,14 +1,17 @@
 /**
- * Modal for capturing one start/end trip photo (speedometer).
- * Compresses to ~50KB, uploads. GPS is optional (not captured); lat/lng may be null.
+ * Modal for capturing one start/end trip photo (speedometer/hour-meter).
+ * Compresses to ~50KB, uploads. GPS is mandatory for assignment evidence.
  */
 
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, ActivityIndicator, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { Camera } from 'lucide-react-native';
 import { uploadTripPhoto } from '@/lib/tripPhotoStorage';
 import { useLocale } from '@/context/LocaleContext';
+import { parseExifGps } from '@/lib/workPhotoExif';
+import { getCoordsWithTimeout } from '@/lib/getCurrentPositionWithTimeout';
 
 export type TripPhotoKind = 'start' | 'end';
 
@@ -50,6 +53,11 @@ export function TripPhotoCaptureModal({
   const handleCapture = async () => {
     setUploading(true);
     try {
+      const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
+      if (locStatus !== 'granted') {
+        Alert.alert(t('alert_error'), t('location_required_trip_start'));
+        return;
+      }
       const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
       if (camStatus !== 'granted') {
         Alert.alert(t('alert_error'), t('trip_camera_permission_required'));
@@ -59,14 +67,31 @@ export function TripPhotoCaptureModal({
         mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
+        exif: true,
       });
       if (result.canceled || !result.assets[0]?.uri) {
         setUploading(false);
         return;
       }
+      const asset = result.assets[0];
+      const exifGps = parseExifGps((asset as { exif?: Record<string, unknown> | null }).exif);
+      let lat = exifGps?.latitude ?? null;
+      let lng = exifGps?.longitude ?? null;
+      if (lat == null || lng == null) {
+        const coords = await getCoordsWithTimeout({
+          timeoutMs: 10_000,
+          useCachedFallback: true,
+          accuracy: Location.Accuracy.High,
+        });
+        lat = coords.lat;
+        lng = coords.lon;
+      }
+      if (lat == null || lng == null) {
+        Alert.alert(t('alert_error'), t('common_gps_position_failed'));
+        return;
+      }
       const photoUrl = await uploadTripPhoto(assignedTripId, kind, result.assets[0].uri);
-
-      onResult({ photoUrl, lat: null, lng: null });
+      onResult({ photoUrl, lat, lng });
     } catch (e) {
       Alert.alert(t('alert_error'), e instanceof Error ? e.message : t('trip_capture_upload_failed'));
     } finally {

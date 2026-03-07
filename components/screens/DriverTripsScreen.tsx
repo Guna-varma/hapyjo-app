@@ -183,7 +183,7 @@ export function DriverTripsScreen() {
   /** End photo: camera-only (uri) or with optional lat/lon (EXIF or filled on confirm). */
   type GpsPhoto = { uri: string; lat?: number; lon?: number };
   /** Start photo: image only; GPS fetched when user taps Start (no UI block on capture). */
-  const [startPhoto, setStartPhoto] = useState<{ uri: string } | null>(null);
+  const [startPhoto, setStartPhoto] = useState<GpsPhoto | null>(null);
   const [endPhoto, setEndPhoto] = useState<GpsPhoto | null>(null);
   const [endingInProgress, setEndingInProgress] = useState(false);
   const [takingStartPhoto, setTakingStartPhoto] = useState(false);
@@ -288,19 +288,24 @@ export function DriverTripsScreen() {
         if (isTruck && startPhoto) {
           // STEP 3: Compress (max 120KB)
           const { uri: photoUri } = await validateAndPrepareWorkPhoto(startPhoto.uri);
-          // STEP 4: Fetch GPS (required; no cache so we prevent start if GPS fails)
-          const { status } = await Location.requestForegroundPermissionsAsync();
-          if (status !== 'granted') {
-            setLocationPermissionModalVisible(true);
-            throw new Error(t('location_required_trip_start'));
+          // GPS is captured with the start photo; fallback to live GPS only when EXIF is unavailable.
+          if (startPhoto.lat != null && startPhoto.lon != null) {
+            startLat = startPhoto.lat;
+            startLon = startPhoto.lon;
+          } else {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+              setLocationPermissionModalVisible(true);
+              throw new Error(t('location_required_trip_start'));
+            }
+            const coords = await getCoordsWithTimeout({
+              timeoutMs: 10_000,
+              useCachedFallback: false,
+              accuracy: Location.Accuracy.High,
+            });
+            startLat = coords.lat;
+            startLon = coords.lon;
           }
-          const coords = await getCoordsWithTimeout({
-            timeoutMs: 10_000,
-            useCachedFallback: false,
-            accuracy: Location.Accuracy.High,
-          });
-          startLat = coords.lat;
-          startLon = coords.lon;
           // STEP 5–6: Upload and insert work_photos
           const thumbUri = await generateThumbnail(photoUri);
           const photoId = generateId('wp');
@@ -354,6 +359,13 @@ export function DriverTripsScreen() {
         // STEP 8: Update assigned_trips status → TRIP_STARTED, started_at
         if (matchingAssigned) {
           try {
+            if (isTruck && startPhotoUri) {
+              await updateAssignedTrip(matchingAssigned.id, {
+                startPhotoUrl: startPhotoUri,
+                startGpsLat: startLat,
+                startGpsLng: startLon,
+              });
+            }
             await updateAssignedTripStatus(matchingAssigned.id, 'TRIP_STARTED');
           } catch {
             // best-effort: trip is created, AS can sync status later
@@ -386,8 +398,29 @@ export function DriverTripsScreen() {
     }
   };
 
-  /** Capture start (speedometer) photo only – no GPS yet; GPS fetched when user taps Start. */
-  const captureStartPhoto = async (): Promise<{ uri: string } | null> => {
+  /** Capture start photo with GPS evidence (EXIF preferred, live GPS fallback). */
+  const captureStartPhoto = async (): Promise<GpsPhoto | null> => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      setLocationPermissionModalVisible(true);
+      return null;
+    }
+    let lat: number;
+    let lon: number;
+    try {
+      const coords = await getCoordsWithTimeout({
+        timeoutMs: 10_000,
+        useCachedFallback: true,
+        accuracy: Location.Accuracy.High,
+      });
+      lat = coords.lat;
+      lon = coords.lon;
+    } catch (e) {
+      const { category, message } = categorizeError(e);
+      const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
+      Alert.alert(t(titleKey), message || t('common_gps_position_failed'));
+      return null;
+    }
     const cam = await ImagePicker.requestCameraPermissionsAsync();
     if (cam.status !== 'granted') {
       Alert.alert(t('alert_error'), t('gps_camera_need_media_permission'));
@@ -397,16 +430,19 @@ export function DriverTripsScreen() {
       mediaTypes: ['images'],
       allowsEditing: false,
       quality: 1,
+      exif: true,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return null;
     const asset = result.assets[0];
-    const uri = asset.uri;
+    let uri = asset.uri;
+    uri = await ensureUriHasBytes(uri);
     const mimeType = (asset as { mimeType?: string }).mimeType;
     if (!isAllowedImageFormat(uri, mimeType)) {
       Alert.alert(t('alert_error'), t('work_photo_only_images'));
       return null;
     }
-    return { uri };
+    const exifGps = parseExifGps((asset as { exif?: Record<string, unknown> | null }).exif);
+    return { uri, lat: exifGps?.latitude ?? lat, lon: exifGps?.longitude ?? lon };
   };
 
   const captureGpsPhoto = async (): Promise<GpsPhoto | null> => {
@@ -560,6 +596,14 @@ export function DriverTripsScreen() {
       });
       if (matchingAssigned) {
         try {
+          if (photoUri) {
+            await updateAssignedTrip(matchingAssigned.id, {
+              endedAt: endTime,
+              endPhotoUrl: photoUri,
+              endGpsLat: endLatVal,
+              endGpsLng: endLonVal,
+            });
+          }
           await updateAssignedTripStatus(matchingAssigned.id, 'TRIP_NEED_APPROVAL');
         } catch (syncErr) {
           if (__DEV__) console.warn('Assigned trip status sync failed:', syncErr);
@@ -720,19 +764,7 @@ export function DriverTripsScreen() {
         const errMsg = photoErr instanceof Error ? photoErr.message : String(photoErr);
         Alert.alert(
           t('trip_photo_upload_failed_title'),
-          errMsg,
-          [
-            { text: t('general_cancel'), style: 'cancel' },
-            {
-              text: t('trip_photo_upload_failed_end_anyway'),
-              onPress: () => {
-                withLoading(() => handleEndTrip(undefined, lat!, lon!, tripSnapshot)).catch((e) => {
-                  const { category, message } = categorizeError(e);
-                  Alert.alert(t(ERROR_CATEGORY_TITLE_KEYS[category]), message || t('trip_end_failed'));
-                });
-              },
-            },
-          ]
+          errMsg
         );
         return;
       }
@@ -771,8 +803,16 @@ export function DriverTripsScreen() {
     if (!vehicle || !userId) return;
     const siteId = vehicle.siteId ?? mySiteIds[0];
     if (!siteId) return;
+    const matchingAssigned = assignedTrips.find(
+      (a) =>
+        a.driverId === userId &&
+        a.vehicleId === selectedVehicleId &&
+        a.vehicleType === 'machine' &&
+        ['TASK_ASSIGNED', 'TASK_PENDING', 'TASK_STARTED', 'TASK_IN_PROGRESS', 'TASK_RESUMED'].includes(a.status)
+    );
     addMachineSession({
       id: generateId('ms'),
+      assignedTripId: matchingAssigned?.id ?? null,
       vehicleId: selectedVehicleId,
       driverId: userId,
       siteId,
@@ -1545,20 +1585,23 @@ export function DriverTripsScreen() {
             const a = tripCaptureModal.assignedTrip;
             const kind = tripCaptureModal.kind;
             const tripId = a.id;
+            if (result.lat == null || result.lng == null) {
+              Alert.alert(t('alert_error'), t('common_gps_position_failed'));
+              return;
+            }
             setTripCaptureModal(null);
             try {
               if (kind === 'start') {
                 const status = a.vehicleType === 'truck' ? 'TRIP_STARTED' : 'TASK_STARTED';
-                await updateAssignedTripStatus(tripId, status);
                 await updateAssignedTrip(tripId, {
                   startPhotoUrl: result.photoUrl,
                   startGpsLat: result.lat,
                   startGpsLng: result.lng,
                 });
+                await updateAssignedTripStatus(tripId, status);
               } else {
                 const now = new Date().toISOString();
                 const status = a.vehicleType === 'truck' ? 'TRIP_NEED_APPROVAL' : 'TASK_NEED_APPROVAL';
-                await updateAssignedTripStatus(tripId, status);
                 try {
                   await updateAssignedTrip(tripId, {
                     endedAt: now,
@@ -1566,6 +1609,7 @@ export function DriverTripsScreen() {
                     endGpsLat: result.lat,
                     endGpsLng: result.lng,
                   });
+                  await updateAssignedTripStatus(tripId, status);
                 } catch (photoErr) {
                   if (__DEV__) console.warn('Could not save end photo/GPS to assigned_trip:', photoErr);
                 }

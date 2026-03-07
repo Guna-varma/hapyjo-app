@@ -200,6 +200,7 @@ export interface Trip {
 
 export interface MachineSession {
   id: string;
+  assignedTripId?: string | null;
   vehicleId: string;
   driverId: string;
   siteId: string;
@@ -207,6 +208,7 @@ export interface MachineSession {
   endTime?: string;
   durationHours?: number;
   fuelConsumed?: number;
+  validatedFuelUsedL?: number | null;
   status: 'in_progress' | 'completed';
   createdAt: string;
 }
@@ -251,6 +253,13 @@ export interface AssignedTrip {
   fuelUsedL?: number | null;
   /** When driver ended trip (status = NEED_APPROVAL) */
   endedAt?: string | null;
+  validatedBy?: string | null;
+  validatedAt?: string | null;
+  validationNotes?: string | null;
+  manualFuelOverrideL?: number | null;
+  overrideReason?: string | null;
+  evidenceExpiresAt?: string | null;
+  evidenceDeletedAt?: string | null;
 }
 
 export interface Issue {

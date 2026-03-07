@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -44,6 +44,7 @@ const GENERAL_EXPENSE_CATEGORIES: ExpenseCategory[] = [
 ];
 
 export function ExpensesScreen() {
+  const PAGE_SIZE = 10;
   const { t } = useLocale();
   const { sites, vehicles, expenses, addExpense, deleteExpense, refetch } = useMockAppStore();
   const { showToast } = useToast();
@@ -64,6 +65,8 @@ export function ExpensesScreen() {
   const [litres, setLitres] = useState('');
   const [costPerLitre, setCostPerLitre] = useState('');
   const [filterSiteId, setFilterSiteId] = useState<string>('');
+  const [expenseTypeFilter, setExpenseTypeFilter] = useState<'all' | 'general' | 'fuel'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const siteVehicles = vehicles.filter((v) => v.siteId === fuelSiteId);
   const fuelCost = (parseFloat(litres) || 0) * (parseFloat(costPerLitre) || 0);
@@ -205,9 +208,39 @@ export function ExpensesScreen() {
 
   const siteOptions = sites.map((s) => ({ value: s.id, label: s.name }));
   const filterSiteOptions = [{ value: '', label: t('expenses_filter_all_sites') }, ...siteOptions];
-  const expensesToShow = filterSiteId
-    ? expenses.filter((e) => e.siteId === filterSiteId)
-    : expenses;
+  const filteredExpenses = useMemo(() => {
+    const bySite = filterSiteId ? expenses.filter((e) => e.siteId === filterSiteId) : expenses;
+    if (expenseTypeFilter === 'all') return bySite;
+    return bySite.filter((e) => e.type === expenseTypeFilter);
+  }, [expenses, filterSiteId, expenseTypeFilter]);
+
+  const sortedExpenses = useMemo(
+    () =>
+      [...filteredExpenses].sort(
+        (a, b) =>
+          new Date(b.createdAt ?? b.date).getTime() - new Date(a.createdAt ?? a.date).getTime()
+      ),
+    [filteredExpenses]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(sortedExpenses.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIdx = (safeCurrentPage - 1) * PAGE_SIZE;
+  const pagedExpenses = sortedExpenses.slice(startIdx, startIdx + PAGE_SIZE);
+
+  const summary = useMemo(() => {
+    const fuel = filteredExpenses
+      .filter((e) => e.type === 'fuel')
+      .reduce((s, e) => s + Number(e.fuelCost ?? e.amountRwf ?? 0), 0);
+    const site = filteredExpenses
+      .filter((e) => e.type !== 'fuel')
+      .reduce((s, e) => s + Number(e.amountRwf ?? 0), 0);
+    return {
+      site,
+      fuel,
+      total: site + fuel,
+    };
+  }, [filteredExpenses]);
 
   const truckOptions = siteVehicles
     .filter((v) => v.type === 'truck')
@@ -246,15 +279,51 @@ export function ExpensesScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>{t('expenses_filter_by_site')}</Text>
-        <FilterChips options={filterSiteOptions} value={filterSiteId} onChange={setFilterSiteId} scroll={false} />
+        <FilterChips
+          options={filterSiteOptions}
+          value={filterSiteId}
+          onChange={(v) => {
+            setFilterSiteId(v);
+            setCurrentPage(1);
+          }}
+          scroll={false}
+        />
+        <Select
+          label="Expense Type"
+          placeholder="All"
+          value={expenseTypeFilter}
+          onChange={(v) => {
+            const next = (v as 'all' | 'general' | 'fuel') || 'all';
+            setExpenseTypeFilter(next);
+            setCurrentPage(1);
+          }}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'general', label: 'Site Expenses' },
+            { value: 'fuel', label: 'Fuel Expenses' },
+          ]}
+        />
+
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Site Expenses</Text>
+            <Text style={styles.summaryValue}>{formatAmount(summary.site)}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Fuel Expenses</Text>
+            <Text style={styles.summaryValue}>{formatAmount(summary.fuel)}</Text>
+          </View>
+        </View>
+        <View style={styles.summaryTotalCard}>
+          <Text style={styles.summaryTotalLabel}>Overall Expenses (Site + Fuel)</Text>
+          <Text style={styles.summaryTotalValue}>{formatAmount(summary.total)}</Text>
+        </View>
+
         <Text style={styles.sectionTitle}>{t('expenses_recent')}</Text>
-        {expensesToShow.length === 0 ? (
+        {pagedExpenses.length === 0 ? (
           <EmptyState title={t('expenses_empty')} message={t('expenses_empty_message')} />
         ) : (
-          expensesToShow
-            .slice(-20)
-            .reverse()
-            .map((e) => (
+          pagedExpenses.map((e) => (
               <ListCard
                 key={e.id}
                 title={e.description}
@@ -275,6 +344,23 @@ export function ExpensesScreen() {
               />
             ))
         )}
+        <View style={styles.paginationRow}>
+          <Pressable
+            onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={safeCurrentPage <= 1}
+            style={[styles.pageBtn, safeCurrentPage <= 1 && styles.pageBtnDisabled]}
+          >
+            <Text style={styles.pageBtnText}>Previous</Text>
+          </Pressable>
+          <Text style={styles.pageText}>Page {safeCurrentPage} / {totalPages}</Text>
+          <Pressable
+            onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={safeCurrentPage >= totalPages}
+            style={[styles.pageBtn, safeCurrentPage >= totalPages && styles.pageBtnDisabled]}
+          >
+            <Text style={styles.pageBtnText}>Next</Text>
+          </Pressable>
+        </View>
       </ScreenContainer>
 
       <FormModal
@@ -448,6 +534,72 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
     marginBottom: layout.grid,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: layout.cardRadius,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  summaryValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  summaryTotalCard: {
+    backgroundColor: colors.blue50,
+    borderRadius: layout.cardRadius,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  summaryTotalLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  summaryTotalValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primary,
+  },
+  paginationRow: {
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pageBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: layout.cardRadius,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+  },
+  pageBtnDisabled: {
+    opacity: 0.45,
+  },
+  pageBtnText: {
+    color: colors.surface,
+    fontWeight: '600',
+  },
+  pageText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
   listAmount: {
     fontWeight: '600',

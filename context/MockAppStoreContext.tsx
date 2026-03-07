@@ -82,6 +82,7 @@ import { showSystemNotificationWithData } from "@/lib/localNotifications";
 import { deleteIssueImagesFromStorage } from "@/lib/issueImageStorage";
 import { getTripTransitionRole, assertValidTransition } from "@/lib/tripLifecycle";
 import { safeDbWrite, getDbErrorMessage } from "@/lib/safeDbWrite";
+import { deleteTripEvidencePhotos } from "@/lib/tripEvidenceStorage";
 
 export interface MockAppStoreState {
   sites: Site[];
@@ -208,9 +209,22 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
         | "hoursUsed"
         | "fuelUsedL"
         | "endedAt"
+        | "validatedBy"
+        | "validatedAt"
+        | "validationNotes"
+        | "manualFuelOverrideL"
+        | "overrideReason"
       >
     >
   ) => Promise<void>;
+  approveAssignedTripReadings: (params: {
+    assignedTripId: string;
+    startReading: number;
+    endReading: number;
+    validationNotes?: string;
+    manualFuelOverrideL?: number | null;
+    overrideReason?: string | null;
+  }) => Promise<void>;
   updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
   updateSiteTask: (id: string, patch: Partial<SiteTask>) => Promise<void>;
   addReport: (report: Report) => Promise<void>;
@@ -222,6 +236,7 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
   markNotificationRead: (id: string) => Promise<void>;
   /** Hard-delete all notifications for current user's role (clear all). */
   clearAllNotifications: () => Promise<void>;
+  cleanupExpiredAssignedTripEvidence: () => Promise<void>;
 }
 
 const defaultContractRate = 500;
@@ -1857,6 +1872,46 @@ function useSupabaseStore(): MockAppStoreContextValue {
     [refetch]
   );
 
+  const approveAssignedTripReadings = useCallback(
+    async (params: {
+      assignedTripId: string;
+      startReading: number;
+      endReading: number;
+      validationNotes?: string;
+      manualFuelOverrideL?: number | null;
+      overrideReason?: string | null;
+    }) => {
+      const {
+        assignedTripId,
+        startReading,
+        endReading,
+        validationNotes,
+        manualFuelOverrideL,
+        overrideReason,
+      } = params;
+      const result = await safeDbWrite(
+        async () => {
+          const { error } = await supabase.rpc("approve_assigned_trip_readings", {
+            p_assigned_trip_id: assignedTripId,
+            p_start_reading: startReading,
+            p_end_reading: endReading,
+            p_validation_notes: validationNotes ?? null,
+            p_manual_fuel_override_l:
+              manualFuelOverrideL != null ? manualFuelOverrideL : null,
+            p_override_reason: overrideReason ?? null,
+          });
+          if (error) throw error;
+        },
+        { retryOnceOnNetwork: true }
+      );
+      if (!result.ok) {
+        throw new Error(getDbErrorMessage(result.error, result.error.message));
+      }
+      await refetch(true);
+    },
+    [refetch]
+  );
+
   const updateTask = useCallback(
     async (id: string, patch: Partial<Task>) => {
       const row = taskToRow(patch);
@@ -2008,6 +2063,36 @@ function useSupabaseStore(): MockAppStoreContextValue {
     await refetch();
   }, [authUser?.id, state.users, refetch]);
 
+  const cleanupExpiredAssignedTripEvidence = useCallback(async () => {
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("assigned_trips")
+      .select("id,start_photo_url,end_photo_url,evidence_expires_at,evidence_deleted_at,status")
+      .in("status", ["TRIP_COMPLETED", "TASK_COMPLETED"])
+      .lte("evidence_expires_at", nowIso)
+      .is("evidence_deleted_at", null)
+      .limit(100);
+    if (error) throw error;
+    const rows = (data ?? []) as {
+      id: string;
+      start_photo_url?: string | null;
+      end_photo_url?: string | null;
+    }[];
+    for (const row of rows) {
+      await deleteTripEvidencePhotos([row.start_photo_url, row.end_photo_url]);
+      const { error: upErr } = await supabase
+        .from("assigned_trips")
+        .update({
+          start_photo_url: null,
+          end_photo_url: null,
+          evidence_deleted_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+      if (upErr) throw upErr;
+    }
+    if (rows.length > 0) await refetch(true);
+  }, [refetch]);
+
   const value = useMemo<MockAppStoreContextValue>(
     () => ({
       ...state,
@@ -2050,6 +2135,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addAssignedTrip,
       updateAssignedTripStatus,
       updateAssignedTrip,
+      approveAssignedTripReadings,
       updateTask,
       updateSiteTask,
       addReport,
@@ -2057,6 +2143,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addNotification,
       markNotificationRead,
       clearAllNotifications,
+      cleanupExpiredAssignedTripEvidence,
     }),
     [
       state,
@@ -2099,6 +2186,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addAssignedTrip,
       updateAssignedTripStatus,
       updateAssignedTrip,
+      approveAssignedTripReadings,
       updateTask,
       updateSiteTask,
       addReport,
@@ -2106,6 +2194,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       addNotification,
       markNotificationRead,
       clearAllNotifications,
+      cleanupExpiredAssignedTripEvidence,
     ]
   );
 

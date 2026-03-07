@@ -141,6 +141,7 @@ export function tripFromRow(row: Record<string, unknown>): Trip {
 export function machineSessionFromRow(row: Record<string, unknown>): MachineSession {
   return {
     id: String(row.id),
+    assignedTripId: row.assigned_trip_id != null ? String(row.assigned_trip_id) : null,
     vehicleId: String(row.vehicle_id),
     driverId: String(row.driver_id),
     siteId: String(row.site_id),
@@ -148,6 +149,7 @@ export function machineSessionFromRow(row: Record<string, unknown>): MachineSess
     endTime: row.end_time != null ? String(row.end_time) : undefined,
     durationHours: row.duration_hours != null ? Number(row.duration_hours) : undefined,
     fuelConsumed: row.fuel_consumed != null ? Number(row.fuel_consumed) : undefined,
+    validatedFuelUsedL: row.validated_fuel_used_l != null ? Number(row.validated_fuel_used_l) : null,
     status: row.status as MachineSession['status'],
     createdAt: row.created_at != null ? String(row.created_at) : '',
   };
@@ -271,6 +273,13 @@ export function assignedTripFromRow(row: Record<string, unknown>): AssignedTrip 
     hoursUsed: row.hours_used != null ? Number(row.hours_used) : null,
     fuelUsedL: row.fuel_used_l != null ? Number(row.fuel_used_l) : null,
     endedAt: row.ended_at != null ? String(row.ended_at) : null,
+    validatedBy: row.validated_by != null ? String(row.validated_by) : null,
+    validatedAt: row.validated_at != null ? String(row.validated_at) : null,
+    validationNotes: row.validation_notes != null ? String(row.validation_notes) : null,
+    manualFuelOverrideL: row.manual_fuel_override_l != null ? Number(row.manual_fuel_override_l) : null,
+    overrideReason: row.override_reason != null ? String(row.override_reason) : null,
+    evidenceExpiresAt: row.evidence_expires_at != null ? String(row.evidence_expires_at) : null,
+    evidenceDeletedAt: row.evidence_deleted_at != null ? String(row.evidence_deleted_at) : null,
   };
 }
 
@@ -306,6 +315,13 @@ export function assignedTripToRow(a: Partial<AssignedTrip>): Record<string, unkn
   if (a.hoursUsed !== undefined) row.hours_used = a.hoursUsed ?? null;
   if (a.fuelUsedL !== undefined) row.fuel_used_l = a.fuelUsedL ?? null;
   if (a.endedAt !== undefined) row.ended_at = a.endedAt ?? null;
+  if (a.validatedBy !== undefined) row.validated_by = a.validatedBy ?? null;
+  if (a.validatedAt !== undefined) row.validated_at = a.validatedAt ?? null;
+  if (a.validationNotes !== undefined) row.validation_notes = a.validationNotes ?? null;
+  if (a.manualFuelOverrideL !== undefined) row.manual_fuel_override_l = a.manualFuelOverrideL ?? null;
+  if (a.overrideReason !== undefined) row.override_reason = a.overrideReason ?? null;
+  if (a.evidenceExpiresAt !== undefined) row.evidence_expires_at = a.evidenceExpiresAt ?? null;
+  if (a.evidenceDeletedAt !== undefined) row.evidence_deleted_at = a.evidenceDeletedAt ?? null;
   return row;
 }
 
@@ -562,6 +578,7 @@ export function tripUpdatePayload(patch: Partial<Trip>): Record<string, unknown>
 export function machineSessionToRow(m: Partial<MachineSession>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (m.id != null) row.id = m.id;
+  if (m.assignedTripId !== undefined) row.assigned_trip_id = m.assignedTripId ?? null;
   if (m.vehicleId != null) row.vehicle_id = m.vehicleId;
   if (m.driverId != null) row.driver_id = m.driverId;
   if (m.siteId != null) row.site_id = m.siteId;
@@ -569,6 +586,7 @@ export function machineSessionToRow(m: Partial<MachineSession>): Record<string, 
   if (m.endTime !== undefined) row.end_time = m.endTime;
   if (m.durationHours !== undefined) row.duration_hours = m.durationHours;
   if (m.fuelConsumed !== undefined) row.fuel_consumed = m.fuelConsumed;
+  if (m.validatedFuelUsedL !== undefined) row.validated_fuel_used_l = m.validatedFuelUsedL ?? null;
   if (m.status != null) row.status = m.status;
   return row;
 }
