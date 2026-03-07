@@ -3,7 +3,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
-import { KeyboardAvoidingView, LogBox, Text, View, useWindowDimensions } from "react-native";
+import { KeyboardAvoidingView, LogBox, Platform, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "../global.css";
 
@@ -93,7 +93,8 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ThemeProvider value={DefaultTheme}>
           <KeyboardAvoidingView
-            behavior="padding"
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            enabled={Platform.OS === "ios"}
             style={{ flex: 1 }}
             keyboardVerticalOffset={0}
           >

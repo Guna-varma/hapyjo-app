@@ -31,6 +31,18 @@ import {
 } from 'lucide-react-native';
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+type SitePerformanceSite = {
+  id: string;
+  name: string;
+  location: string;
+  status: 'active' | 'inactive' | 'completed';
+  startDate: string;
+  expectedEndDate?: string;
+  budget: number;
+  spent: number;
+  progress: number;
+  contractRateRwf?: number | null;
+};
 
 /** Format period "YYYY-MM" to "Mon-YYYY" e.g. "Mar-2026" */
 function formatPeriodLabel(period: string): string {
@@ -52,6 +64,11 @@ function normalizePeriodToYYYYMM(period: string): string {
   return p;
 }
 
+function getCurrentYYYYMM(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function getReportsSubtitle(role: string | undefined, t: (key: string) => string): string {
   if (role === 'accountant') return t('reports_subtitle_accountant');
   if (role === 'owner') return t('reports_subtitle_owner');
@@ -61,8 +78,8 @@ function getReportsSubtitle(role: string | undefined, t: (key: string) => string
 }
 
 /** Group sites by start date month (YYYY-MM). */
-function getSitesGroupedByMonth(sites: { id: string; name: string; location: string; status: string; startDate: string; expectedEndDate?: string; budget: number; spent: number; progress: number }[]): Map<string, typeof sites> {
-  const map = new Map<string, typeof sites>();
+function getSitesGroupedByMonth(sites: SitePerformanceSite[]): Map<string, SitePerformanceSite[]> {
+  const map = new Map<string, SitePerformanceSite[]>();
   sites.forEach((site) => {
     const d = site.startDate?.slice(0, 7) || '';
     if (!d) return;
@@ -295,6 +312,10 @@ export function ReportsScreen() {
   const [selectedType, setSelectedType] = useState<'all' | 'financial' | 'operations' | 'site_performance'>('all');
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('');
   const [monthDropdownVisible, setMonthDropdownVisible] = useState(false);
+  const [sitePerfMonthDropdownVisible, setSitePerfMonthDropdownVisible] = useState(false);
+  const [selectedSitePerfMonth, setSelectedSitePerfMonth] = useState<string>(getCurrentYYYYMM());
+  const [selectedSiteId, setSelectedSiteId] = useState<string>('');
+  const [siteDropdownVisible, setSiteDropdownVisible] = useState(false);
   const [fuelSiteId, setFuelSiteId] = useState<string | null>(null);
   const [fuelVehicleType, setFuelVehicleType] = useState<'all' | 'truck' | 'machine'>('all');
   const [fuelDateFrom, setFuelDateFrom] = useState('');
@@ -306,11 +327,38 @@ export function ReportsScreen() {
   /** Same financial reports layout for Owner and Accountant: Financial Summary, site budgets, contract rates, expenses, Export/Share. */
   const isFinancialReportsLayout = user?.role === 'owner' || user?.role === 'accountant';
   const [selectedSiteForExpenseDetail, setSelectedSiteForExpenseDetail] = useState<typeof sites[0] | null>(null);
+  const selectedSiteLabel = selectedSiteId
+    ? (sites.find((s) => s.id === selectedSiteId)?.name ?? selectedSiteId)
+    : t('reports_all_sites');
+  const filteredSites = useMemo(
+    () => (selectedSiteId ? sites.filter((s) => s.id === selectedSiteId) : sites),
+    [sites, selectedSiteId]
+  );
+  const filteredExpenses = useMemo(
+    () => (selectedSiteId ? expenses.filter((e) => e.siteId === selectedSiteId) : expenses),
+    [expenses, selectedSiteId]
+  );
+  const siteFilterOptions = useMemo(
+    () => [
+      { id: '', name: t('reports_all_sites') },
+      ...sites
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((s) => ({ id: s.id, name: s.name })),
+    ],
+    [sites, t]
+  );
 
   // Tabs as data drivers: refetch when report type filter changes so list stays in sync (and future API can filter by type)
   useEffect(() => {
     refetch();
   }, [selectedType, refetch]);
+
+  useEffect(() => {
+    if (selectedSiteForExpenseDetail && selectedSiteId && selectedSiteForExpenseDetail.id !== selectedSiteId) {
+      setSelectedSiteForExpenseDetail(null);
+    }
+  }, [selectedSiteForExpenseDetail, selectedSiteId]);
 
 
   // One financial report per month: normalize "This month" → current YYYY-MM and prefer YYYY-MM period.
@@ -361,22 +409,46 @@ export function ReportsScreen() {
     { id: 'site_performance', labelKey: 'reports_site_perf', Icon: TrendingUp },
   ];
 
-  const financialSummary = useMemo(
-    () => buildFinancialSummary({ sites, surveys, expenses }),
-    [sites, surveys, expenses]
+  const filteredSurveys = useMemo(
+    () => (selectedSiteId ? surveys.filter((s) => s.siteId === selectedSiteId) : surveys),
+    [surveys, selectedSiteId]
+  );
+  const scopedFinancialSummary = useMemo(
+    () => buildFinancialSummary({ sites: filteredSites, surveys: filteredSurveys, expenses: filteredExpenses }),
+    [filteredSites, filteredSurveys, filteredExpenses]
   );
   const siteExpenseById = useMemo(
     () =>
-      sites.reduce<Record<string, number>>((acc, site) => {
-        acc[site.id] = financialSummary.bySiteId[site.id]?.expensesRwf ?? 0;
+      filteredSites.reduce<Record<string, number>>((acc, site) => {
+        acc[site.id] = scopedFinancialSummary.bySiteId[site.id]?.expensesRwf ?? 0;
         return acc;
       }, {}),
-    [sites, financialSummary.bySiteId]
+    [filteredSites, scopedFinancialSummary.bySiteId]
+  );
+  const sitePerformanceByMonth = useMemo(
+    () => getSitesGroupedByMonth(filteredSites),
+    [filteredSites]
+  );
+  const sitePerformanceMonthOptions = useMemo(() => {
+    const months = Array.from(sitePerformanceByMonth.keys()).filter((m) => YYYY_MM.test(m));
+    const currentMonth = getCurrentYYYYMM();
+    if (!months.includes(currentMonth)) months.push(currentMonth);
+    months.sort((a, b) => b.localeCompare(a));
+    return months.map((m) => ({ value: m, labelKey: formatPeriodLabel(m) }));
+  }, [sitePerformanceByMonth]);
+  useEffect(() => {
+    if (sitePerformanceMonthOptions.length === 0) return;
+    const stillValid = sitePerformanceMonthOptions.some((o) => o.value === selectedSitePerfMonth);
+    if (!stillValid) setSelectedSitePerfMonth(sitePerformanceMonthOptions[0].value);
+  }, [sitePerformanceMonthOptions, selectedSitePerfMonth]);
+  const selectedMonthSitesForPerformance = useMemo(
+    () => sitePerformanceByMonth.get(selectedSitePerfMonth) ?? [],
+    [sitePerformanceByMonth, selectedSitePerfMonth]
   );
 
-  // Single source of truth: budget from sites, spent from expenses (sync with actual data)
-  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
-  const totalSpent = expenses.reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
+  // Single source of truth for summary cards: scoped by selected site (or all sites).
+  const totalBudget = scopedFinancialSummary.totals.totalBudgetRwf;
+  const totalSpent = scopedFinancialSummary.totals.expensesRwf;
   const remaining = Math.max(0, totalBudget - totalSpent);
   const utilizationPct = totalBudget > 0 ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0;
 
@@ -455,21 +527,22 @@ export function ReportsScreen() {
     actualFuelByVehicle[v.id] = fromTrips + fromSessions;
   });
 
-  const totalSpentAll = financialSummary.totals.expensesRwf;
-  const totalBudgetAll = financialSummary.totals.totalBudgetRwf;
-  const remainingBudgetAll = financialSummary.totals.remainingBudgetRwf;
-  const totalExpensesAll = financialSummary.totals.expensesRwf;
-  const totalMaintenanceAll = expenses
+  const totalSpentAll = totalSpent;
+  const totalBudgetAll = totalBudget;
+  const remainingBudgetAll = remaining;
+  const totalExpensesAll = totalSpent;
+  const totalMaintenanceAll = filteredExpenses
     .filter((e) => e.expenseCategory === 'maintenance')
     .reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
-  const revenueAll = financialSummary.totals.revenueRwf;
-  const netProfitAll = financialSummary.totals.profitRwf;
+  const revenueAll = scopedFinancialSummary.totals.revenueRwf;
+  const netProfitAll = scopedFinancialSummary.totals.profitRwf;
 
   // Live data for Operations tab (not from saved reports)
-  const activeSitesCount = sites.filter((s) => s.status === 'active').length;
-  const completedTasksCount = tasks.filter((t) => t.status === 'completed').length;
-  const pendingTasksCount = tasks.filter((t) => t.status === 'pending').length;
-  const inProgressTasksCount = tasks.filter((t) => t.status === 'in_progress').length;
+  const scopedTasks = selectedSiteId ? tasks.filter((t) => t.siteId === selectedSiteId) : tasks;
+  const activeSitesCount = filteredSites.filter((s) => s.status === 'active').length;
+  const completedTasksCount = scopedTasks.filter((t) => t.status === 'completed').length;
+  const pendingTasksCount = scopedTasks.filter((t) => t.status === 'pending').length;
+  const inProgressTasksCount = scopedTasks.filter((t) => t.status === 'in_progress').length;
 
   const handleExportCSV = async (report: (typeof reports)[0]) => {
     if (!report.data || typeof report.data !== 'object') {
@@ -510,9 +583,11 @@ export function ReportsScreen() {
     }
   };
 
-  const handleExportSitePerformanceCSV = async (sitesList: typeof sites) => {
+  const handleExportSitePerformanceCSV = async (sitesList: SitePerformanceSite[], monthScope?: string) => {
     setExportingId('site-perf');
     try {
+      const scopedMonth = monthScope && YYYY_MM.test(monthScope) ? monthScope : '';
+      const scopedMonthLabel = scopedMonth ? formatPeriodLabel(scopedMonth) : t('reports_all_months');
       const headers = ['site_name', 'location', 'status', 'start_date', 'deadline_date', 'days_remaining', 'budget', 'spent', 'progress', 'contract_rate_rwf_m3'];
       const rows = sitesList.map((s) => [
         csvEscape(s.name),
@@ -526,8 +601,16 @@ export function ReportsScreen() {
         csvEscape(s.progress ?? 0),
         csvEscape((s.contractRateRwf ?? 0) > 0 ? String(s.contractRateRwf) : t('owner_contract_rate_not_set')),
       ].join(','));
-      const csv = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
-      const filename = `HapyJo_Site_Performance_${new Date().toISOString().slice(0, 10)}.csv`;
+      const csv = '\uFEFF' + [
+        csvEscape('HapyJo – Monthly Site Performance'),
+        '',
+        [csvEscape('Site scope'), csvEscape(selectedSiteLabel)].join(','),
+        [csvEscape('Month'), csvEscape(scopedMonthLabel)].join(','),
+        '',
+        headers.join(','),
+        ...rows,
+      ].join('\r\n');
+      const filename = `HapyJo_Monthly_Site_Performance_${scopedMonth || new Date().toISOString().slice(0, 10)}.csv`;
       const dir = documentDirectory ?? cacheDirectory ?? '';
       const path = `${dir}${filename}`;
       await writeAsStringAsync(path, csv, { encoding: EncodingType.UTF8 });
@@ -606,7 +689,7 @@ export function ReportsScreen() {
         [csvEscape(t('reports_net_profit')), csvEscape(formatAmount(netProfitAll, true))].join(','),
         '',
         [csvEscape('Site'), csvEscape('Location'), csvEscape(t('reports_total_budget')), csvEscape(t('reports_total_spent')), csvEscape(t('reports_contract_rate_rwf_m3'))].join(','),
-        ...sites.map((s) => [
+        ...filteredSites.map((s) => [
           csvEscape(s.name ?? ''),
           csvEscape(s.location ?? ''),
           csvEscape(s.budget ?? 0),
@@ -635,10 +718,12 @@ export function ReportsScreen() {
   const handleExportFuelSummaryCSV = async () => {
     setExportingId('fuel-summary');
     try {
-      const byMonth = getFuelByMonth(expenses);
+      const byMonth = getFuelByMonth(filteredExpenses);
       const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
       const rows: string[] = [
-        csvEscape('HapyJo – Fuel Summary (global by month)'),
+        csvEscape('HapyJo – Fuel Summary (by month)'),
+        '',
+        [csvEscape('Scope'), csvEscape(selectedSiteLabel)].join(','),
         '',
         [csvEscape('Month'), csvEscape(t('reports_fuel_used')), csvEscape(t('reports_fuel_cost_month'))].join(','),
         ...months.map((ym) => {
@@ -672,7 +757,7 @@ export function ReportsScreen() {
         csvEscape('HapyJo – Site Expense Reports'),
         '',
         [csvEscape('Site'), csvEscape('Location'), csvEscape(t('reports_total_site_expense')), csvEscape(t('reports_contract_rate_rwf_m3'))].join(','),
-        ...sites.map((s) => [
+        ...filteredSites.map((s) => [
           csvEscape(s.name ?? ''),
           csvEscape(s.location ?? ''),
           csvEscape(formatAmount(siteExpenseById[s.id] ?? 0, true)),
@@ -680,7 +765,7 @@ export function ReportsScreen() {
         ].join(',')),
         '',
         [csvEscape('Date'), csvEscape('Site'), csvEscape('Category'), csvEscape('Amount (RWF)'), csvEscape('Description')].join(','),
-        ...expenses.map((e) => {
+        ...filteredExpenses.map((e) => {
           const siteName = sites.find((x) => x.id === e.siteId)?.name ?? '';
           return [csvEscape(e.date ?? ''), csvEscape(siteName), csvEscape(expenseCategoryLabel(e)), csvEscape(e.amountRwf ?? 0), csvEscape(e.description ?? '')].join(',');
         }),
@@ -756,40 +841,76 @@ export function ReportsScreen() {
           </View>
         ) : (
           <>
-        {/* Filter Tabs – horizontal scroll so all 4 buttons visible, no cut-off */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          className="mb-4"
-          contentContainerStyle={{
-            paddingRight: theme.screenPadding + 24,
-            flexDirection: 'row',
-            alignItems: 'center',
-          }}
-        >
+        {/* Filter tabs: wrap on small screens so labels are never clipped */}
+        <View style={reportCardStyles.tabsWrap}>
           {reportTypes.map((type) => {
             const isSelected = selectedType === type.id;
             const Icon = type.Icon;
+            const label = (t(type.labelKey) || '').trim() || (type.id === 'site_performance' ? t('reports_site_performance') : type.id);
             return (
               <TouchableOpacity
                 key={type.id}
                 onPress={() => setSelectedType(type.id)}
-                className={`px-3.5 py-2 rounded-lg flex-row items-center ${
-                  isSelected ? 'bg-blue-600' : 'bg-white border border-gray-300'
-                }`}
-                style={{ marginRight: 8 }}
+                style={[
+                  reportCardStyles.filterTabBtn,
+                  isSelected && reportCardStyles.filterTabBtnSelected,
+                ]}
               >
                 <Icon size={18} color={isSelected ? colors.surface : colors.gray600} />
-                <Text
-                  className={`ml-2 font-semibold ${isSelected ? 'text-white' : 'text-gray-700'}`}
-                  style={{ fontSize: 13 }}
-                >
-                  {t(type.labelKey)}
+                <Text style={[reportCardStyles.filterTabText, isSelected && reportCardStyles.filterTabTextSelected]} numberOfLines={1}>
+                  {label}
                 </Text>
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </View>
+
+        <View style={reportCardStyles.siteFilterRow}>
+          <Text style={reportCardStyles.siteFilterLabel}>{t('tab_sites')}</Text>
+          <Pressable
+            onPress={() => setSiteDropdownVisible(true)}
+            style={reportCardStyles.monthDropdown}
+            accessibilityLabel={t('tab_sites')}
+            accessibilityRole="button"
+          >
+            <Text style={reportCardStyles.monthDropdownText} numberOfLines={1}>
+              {selectedSiteLabel}
+            </Text>
+            <ChevronDown size={18} color={colors.primary} />
+          </Pressable>
+        </View>
+        <Modal
+          visible={siteDropdownVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSiteDropdownVisible(false)}
+        >
+          <Pressable style={reportCardStyles.monthModalOverlay} onPress={() => setSiteDropdownVisible(false)}>
+            <View style={reportCardStyles.monthModalContent} onStartShouldSetResponder={() => true}>
+              <Text style={reportCardStyles.monthModalTitle}>{t('tab_sites')}</Text>
+              <FlatList
+                data={siteFilterOptions}
+                keyExtractor={(item) => item.id || '__all_sites__'}
+                renderItem={({ item }) => {
+                  const selected = item.id === selectedSiteId;
+                  return (
+                    <Pressable
+                      onPress={() => {
+                        setSelectedSiteId(item.id);
+                        setSiteDropdownVisible(false);
+                      }}
+                      style={[reportCardStyles.monthOption, selected && reportCardStyles.monthOptionSelected]}
+                    >
+                      <Text style={[reportCardStyles.monthOptionText, selected && reportCardStyles.monthOptionTextSelected]}>
+                        {item.name}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+              />
+            </View>
+          </Pressable>
+        </Modal>
 
         {readOnly && (
           <Card className="mb-4 bg-amber-50 border border-amber-200">
@@ -805,8 +926,8 @@ export function ReportsScreen() {
         {isFinancialReportsLayout && (
           <>
             {(selectedType === 'all' || selectedType === 'financial') && (
-              <View className="mb-4">
-                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_financial_summary')}</Text>
+              <View style={reportCardStyles.sectionBlock}>
+                <Text style={reportCardStyles.sectionTitleText}>{t('reports_financial_summary')}</Text>
                 <View style={ownerStyles.financialRow}>
                   <Card style={ownerStyles.metricCard}>
                     <Banknote size={20} color="#059669" />
@@ -830,20 +951,17 @@ export function ReportsScreen() {
                   </Card>
                 </View>
                 <View style={ownerStyles.bannerActions}>
-                  <TouchableOpacity onPress={() => handleExportFinancialSummaryCSV()} disabled={exportingId === 'financial-summary'} style={ownerStyles.exportPrimaryBtn}>
+                  <TouchableOpacity onPress={() => handleExportFinancialSummaryCSV()} disabled={exportingId === 'financial-summary'} style={ownerStyles.exportAndShareBtn}>
                     <Download size={18} color="#fff" />
-                    <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'financial-summary' ? t('reports_exporting') : t('reports_export_report')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleExportFinancialSummaryCSV()} disabled={exportingId === 'financial-summary'} style={ownerStyles.shareSecondaryBtn}>
-                    <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                    <Text style={ownerStyles.exportAndShareBtnText}>{exportingId === 'financial-summary' ? t('reports_exporting') : t('reports_export_download_share_btn')}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             )}
 
             {selectedType === 'all' && (
-              <View className="mb-4">
-                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_available_categories')}</Text>
+              <View style={reportCardStyles.sectionBlock}>
+                <Text style={reportCardStyles.sectionTitleText}>{t('reports_available_categories')}</Text>
                 <View style={ownerStyles.categoryRow}>
                   <TouchableOpacity onPress={() => setSelectedType('site_performance')} style={ownerStyles.categoryCard}>
                     <TrendingUp size={22} color={colors.primary} />
@@ -866,37 +984,89 @@ export function ReportsScreen() {
             )}
 
             {(selectedType === 'all' || selectedType === 'operations' || selectedType === 'site_performance') && (
-              <View className="mb-4">
-                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_overall_site_perf')}</Text>
+              <View style={reportCardStyles.sectionBlock}>
+                <View style={reportCardStyles.sectionHeaderRow}>
+                  <Text style={reportCardStyles.sectionTitleText}>{t('reports_overall_site_perf')}</Text>
+                  <Pressable
+                    onPress={() => setSitePerfMonthDropdownVisible(true)}
+                    style={reportCardStyles.monthDropdown}
+                    accessibilityLabel={t('reports_month_filter')}
+                    accessibilityRole="button"
+                  >
+                    <Text style={reportCardStyles.monthDropdownText}>
+                      {selectedSitePerfMonth ? formatPeriodLabel(selectedSitePerfMonth) : t('reports_all_months')}
+                    </Text>
+                    <ChevronDown size={18} color={colors.primary} />
+                  </Pressable>
+                </View>
+                <Modal
+                  visible={sitePerfMonthDropdownVisible}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setSitePerfMonthDropdownVisible(false)}
+                >
+                  <Pressable style={reportCardStyles.monthModalOverlay} onPress={() => setSitePerfMonthDropdownVisible(false)}>
+                    <View style={reportCardStyles.monthModalContent} onStartShouldSetResponder={() => true}>
+                      <Text style={reportCardStyles.monthModalTitle}>{t('reports_month_filter')}</Text>
+                      <FlatList
+                        data={sitePerformanceMonthOptions}
+                        keyExtractor={(item) => item.value}
+                        renderItem={({ item }) => {
+                          const selected = item.value === selectedSitePerfMonth;
+                          return (
+                            <Pressable
+                              onPress={() => {
+                                setSelectedSitePerfMonth(item.value);
+                                setSitePerfMonthDropdownVisible(false);
+                              }}
+                              style={[reportCardStyles.monthOption, selected && reportCardStyles.monthOptionSelected]}
+                            >
+                              <Text style={[reportCardStyles.monthOptionText, selected && reportCardStyles.monthOptionTextSelected]}>
+                                {item.labelKey}
+                              </Text>
+                            </Pressable>
+                          );
+                        }}
+                      />
+                    </View>
+                  </Pressable>
+                </Modal>
                 {(() => {
-                  const sitesByMonth = getSitesGroupedByMonth(sites);
-                  const months = Array.from(sitesByMonth.keys()).sort((a, b) => b.localeCompare(a));
-                  return (
+                  const monthSites = selectedMonthSitesForPerformance;
+                  return monthSites.length === 0 ? (
+                    <EmptyState
+                      icon={<TrendingUp size={32} color={colors.textMuted} />}
+                      title={t('reports_no_sites')}
+                      message={`${formatPeriodLabel(selectedSitePerfMonth)} ${t('reports_empty_sites_hint')}`}
+                    />
+                  ) : (
                     <>
-                      {months.map((ym) => (
-                        <View key={ym} style={ownerStyles.monthSection}>
-                          <Text style={ownerStyles.monthTitle}>{formatPeriodLabel(ym)}</Text>
-                          {(sitesByMonth.get(ym) ?? []).map((site) => (
-                            <SitePerformanceCard
-                              key={site.id}
-                              site={{ ...site, spent: siteExpenseById[site.id] ?? 0 }}
-                              formatAmount={formatAmount}
-                              t={t}
-                              reportCardStyles={reportCardStyles}
-                              ownerStyles={ownerStyles}
-                            />
-                          ))}
-                        </View>
-                      ))}
-                      <TouchableOpacity onPress={() => handleExportSitePerformanceCSV(sites)} style={ownerStyles.exportReportBtn} disabled={exportingId === 'site-perf'}>
+                      <View style={ownerStyles.monthSection}>
+                        <Text style={ownerStyles.monthTitle}>{formatPeriodLabel(selectedSitePerfMonth)}</Text>
+                        {monthSites.map((site) => (
+                          <SitePerformanceCard
+                            key={site.id}
+                            site={{ ...site, spent: siteExpenseById[site.id] ?? 0 }}
+                            formatAmount={formatAmount}
+                            t={t}
+                            reportCardStyles={reportCardStyles}
+                            ownerStyles={ownerStyles}
+                          />
+                        ))}
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleExportSitePerformanceCSV(monthSites, selectedSitePerfMonth)}
+                        style={ownerStyles.exportReportBtn}
+                        disabled={exportingId === 'site-perf'}
+                      >
                         <Download size={16} color="#2563eb" />
                         <Text style={ownerStyles.exportReportBtnText}>{exportingId === 'site-perf' ? t('reports_exporting') : t('reports_export_report')}</Text>
                       </TouchableOpacity>
                     </>
                   );
                 })()}
-                <Text style={[reportCardStyles.sectionTitleText, { marginTop: 20 }]} className="mb-3">{t('reports_current_site_perf')}</Text>
-                {sites.filter((s) => s.status === 'active').sort((a, b) => (a.expectedEndDate || '').localeCompare(b.expectedEndDate || '')).map((site) => (
+                <Text style={[reportCardStyles.sectionTitleText, reportCardStyles.sectionTitleSpaced]}>{t('reports_current_site_perf')}</Text>
+                {filteredSites.filter((s) => s.status === 'active').sort((a, b) => (a.expectedEndDate || '').localeCompare(b.expectedEndDate || '')).map((site) => (
                   <SitePerformanceCard
                     key={site.id}
                     site={{ ...site, spent: siteExpenseById[site.id] ?? 0 }}
@@ -910,20 +1080,19 @@ export function ReportsScreen() {
             )}
 
             {(selectedType === 'all' || selectedType === 'financial') && (
-              <View className="mb-4">
-                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_fuel_summary')}</Text>
-                <Text style={ownerStyles.mutedText} className="mb-2">{t('reports_fuel_summary_global_hint')}</Text>
+              <View style={reportCardStyles.sectionBlock}>
+                <Text style={reportCardStyles.sectionTitleText}>{t('reports_fuel_summary')}</Text>
+                <Text style={ownerStyles.mutedText}>
+                  {selectedSiteId ? `${t('tab_sites')}: ${selectedSiteLabel}` : t('reports_fuel_summary_global_hint')}
+                </Text>
                 <View style={ownerStyles.bannerActions}>
-                  <TouchableOpacity onPress={() => handleExportFuelSummaryCSV()} disabled={exportingId === 'fuel-summary'} style={ownerStyles.exportPrimaryBtn}>
+                  <TouchableOpacity onPress={() => handleExportFuelSummaryCSV()} disabled={exportingId === 'fuel-summary'} style={ownerStyles.exportAndShareBtn}>
                     <Download size={18} color="#fff" />
-                    <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'fuel-summary' ? t('reports_exporting') : t('reports_export_report')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleExportFuelSummaryCSV()} disabled={exportingId === 'fuel-summary'} style={ownerStyles.shareSecondaryBtn}>
-                    <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                    <Text style={ownerStyles.exportAndShareBtnText}>{exportingId === 'fuel-summary' ? t('reports_exporting') : t('reports_export_download_share_btn')}</Text>
                   </TouchableOpacity>
                 </View>
                 {(() => {
-                  const byMonth = getFuelByMonth(expenses);
+                  const byMonth = getFuelByMonth(filteredExpenses);
                   const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
                   return months.length === 0 ? <Text style={ownerStyles.mutedText}>{t('reports_no_sites')}</Text> : months.map((ym) => {
                     const row = byMonth.get(ym)!;
@@ -946,21 +1115,18 @@ export function ReportsScreen() {
             )}
 
             {(selectedType === 'all' || selectedType === 'financial') && (
-              <View className="mb-4">
-                <Text style={reportCardStyles.sectionTitleText} className="mb-3">{t('reports_site_expense_reports')}</Text>
+              <View style={reportCardStyles.sectionBlock}>
+                <Text style={reportCardStyles.sectionTitleText}>{t('reports_site_expense_reports')}</Text>
                 <View style={ownerStyles.bannerActions}>
-                  <TouchableOpacity onPress={() => handleExportSiteExpensesCSV()} disabled={exportingId === 'site-expenses'} style={ownerStyles.exportPrimaryBtn}>
+                  <TouchableOpacity onPress={() => handleExportSiteExpensesCSV()} disabled={exportingId === 'site-expenses'} style={ownerStyles.exportAndShareBtn}>
                     <Download size={18} color="#fff" />
-                    <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'site-expenses' ? t('reports_exporting') : t('reports_export_report')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleExportSiteExpensesCSV()} disabled={exportingId === 'site-expenses'} style={ownerStyles.shareSecondaryBtn}>
-                    <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                    <Text style={ownerStyles.exportAndShareBtnText}>{exportingId === 'site-expenses' ? t('reports_exporting') : t('reports_export_download_share_btn')}</Text>
                   </TouchableOpacity>
                 </View>
-                {sites.length === 0 ? (
+                {filteredSites.length === 0 ? (
                   <EmptyState icon={<Banknote size={32} color={colors.textMuted} />} title={t('reports_no_sites')} message="" />
                 ) : (
-                  sites.map((site) => (
+                  filteredSites.map((site) => (
                     <TouchableOpacity key={site.id} onPress={() => setSelectedSiteForExpenseDetail(site)} activeOpacity={0.7}>
                       <Card style={reportCardStyles.siteCard}>
                         <View style={reportCardStyles.siteCardHeader}>
@@ -1005,12 +1171,9 @@ export function ReportsScreen() {
                         <Text style={ownerStyles.metricValue}>{formatAmount(total, true)}</Text>
                       </Card>
                       <View style={[ownerStyles.bannerActions, { marginTop: 12 }]}>
-                        <TouchableOpacity onPress={() => handleExportSiteExpenseDetailCSV(selectedSiteForExpenseDetail)} disabled={exportingId === 'site-expense-detail'} style={ownerStyles.exportPrimaryBtn}>
+                        <TouchableOpacity onPress={() => handleExportSiteExpenseDetailCSV(selectedSiteForExpenseDetail)} disabled={exportingId === 'site-expense-detail'} style={ownerStyles.exportAndShareBtn}>
                           <Download size={18} color="#fff" />
-                          <Text style={ownerStyles.exportPrimaryBtnText}>{exportingId === 'site-expense-detail' ? t('reports_exporting') : t('reports_export_report')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => handleExportSiteExpenseDetailCSV(selectedSiteForExpenseDetail)} disabled={exportingId === 'site-expense-detail'} style={ownerStyles.shareSecondaryBtn}>
-                          <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
+                          <Text style={ownerStyles.exportAndShareBtnText}>{exportingId === 'site-expense-detail' ? t('reports_exporting') : t('reports_export_download_share_btn')}</Text>
                         </TouchableOpacity>
                       </View>
                       {months.map((ym) => (
@@ -1074,7 +1237,7 @@ export function ReportsScreen() {
         {selectedType === 'site_performance' && (
           <View className="mb-4">
             <Text className="text-sm font-semibold text-slate-600 mb-2">{t('reports_live_sites_title')}</Text>
-            {sites.map((site) => {
+            {filteredSites.map((site) => {
               const siteSpent = siteExpenseById[site.id] ?? 0;
               const siteBudget = site.budget ?? 0;
               const utilization = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
@@ -1162,7 +1325,7 @@ export function ReportsScreen() {
                   <View style={reportCardStyles.bannerSummary}>
                     {(() => {
                       const d = selectedBannerReport.data ?? {};
-                      const hasData = (Number(d.totalBudget) ?? 0) !== 0 || (Number(d.totalSpent) ?? 0) !== 0;
+                      const hasData = !selectedSiteId && ((Number(d.totalBudget) ?? 0) !== 0 || (Number(d.totalSpent) ?? 0) !== 0);
                       const budget = hasData ? (Number(d.totalBudget) || 0) : totalBudgetAll;
                       const spent = hasData ? (Number(d.totalSpent) || 0) : totalSpentAll;
                       const remaining = hasData ? (Number(d.remainingBudget) ?? budget - spent) : remainingBudgetAll;
@@ -1288,7 +1451,7 @@ export function ReportsScreen() {
 
                 <View style={reportCardStyles.dataBox}>
                   {report.type === 'financial' && (() => {
-                    const hasData = report.data && (Number(report.data.totalBudget) != null && Number(report.data.totalBudget) !== 0 || Number(report.data.totalSpent) != null && Number(report.data.totalSpent) !== 0);
+                    const hasData = !selectedSiteId && report.data && (Number(report.data.totalBudget) != null && Number(report.data.totalBudget) !== 0 || Number(report.data.totalSpent) != null && Number(report.data.totalSpent) !== 0);
                     const budget = hasData ? (Number(report.data?.totalBudget) || 0) : totalBudgetAll;
                     const spent = hasData ? (Number(report.data?.totalSpent) || 0) : totalSpentAll;
                     const remaining = hasData ? (Number(report.data?.remainingBudget) ?? (budget - spent)) : remainingBudgetAll;
@@ -1420,10 +1583,10 @@ export function ReportsScreen() {
         )}
 
         {/* Current site performance – live list so all sites (e.g. Demo 25%) show in Reports */}
-        {(selectedType === 'all' || selectedType === 'financial') && showSummary && sites.length > 0 && (
+        {(selectedType === 'all' || selectedType === 'financial') && showSummary && filteredSites.length > 0 && (
           <View className="mb-4">
             <Text className="text-lg font-bold text-gray-900 mb-3">{t('reports_current_site_performance')}</Text>
-            {sites.map((site) => {
+            {filteredSites.map((site) => {
               const siteSpent = siteExpenseById[site.id] ?? 0;
               const siteBudget = site.budget ?? 0;
               const utilization = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
@@ -1585,19 +1748,12 @@ export function ReportsScreen() {
               <TouchableOpacity
                 onPress={() => handleExportVehicleFuelReport()}
                 disabled={exportingId === 'vehicle-fuel'}
-                style={ownerStyles.exportPrimaryBtn}
+                style={ownerStyles.exportAndShareBtn}
               >
                 <Download size={18} color="#fff" />
-                <Text style={ownerStyles.exportPrimaryBtnText}>
-                  {exportingId === 'vehicle-fuel' ? t('reports_exporting') : t('reports_export_report')}
+                <Text style={ownerStyles.exportAndShareBtnText}>
+                  {exportingId === 'vehicle-fuel' ? t('reports_exporting') : t('reports_export_download_share_btn')}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleExportVehicleFuelReport()}
-                disabled={exportingId === 'vehicle-fuel'}
-                style={ownerStyles.shareSecondaryBtn}
-              >
-                <Text style={ownerStyles.shareSecondaryBtnText}>{t('reports_share_whatsapp')}</Text>
               </TouchableOpacity>
             </View>
             {filteredFuelEntries.length > 0 && (
@@ -1689,6 +1845,38 @@ export function ReportsScreen() {
 }
 
 const reportCardStyles = StyleSheet.create({
+  tabsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 12,
+  },
+  filterTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    backgroundColor: '#fff',
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  filterTabBtnSelected: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  filterTabText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  filterTabTextSelected: {
+    color: '#ffffff',
+  },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1703,6 +1891,26 @@ const reportCardStyles = StyleSheet.create({
     color: '#1e293b',
     flex: 1,
     minWidth: 0,
+    marginBottom: 12,
+  },
+  sectionBlock: {
+    marginBottom: 24,
+  },
+  siteFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 10,
+  },
+  siteFilterLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  sectionTitleSpaced: {
+    marginTop: 20,
+    marginBottom: 12,
   },
   monthDropdown: {
     flexDirection: 'row',
@@ -1989,7 +2197,7 @@ const reportCardStyles = StyleSheet.create({
     textAlign: 'center',
   },
   siteCard: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   siteCardHeader: {
     flexDirection: 'row',
@@ -2021,13 +2229,15 @@ const ownerStyles = StyleSheet.create({
   financialRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 14,
+    marginBottom: 4,
   },
   metricCard: {
     flex: 1,
     minWidth: '47%',
-    padding: 12,
+    padding: 14,
     alignItems: 'center',
+    margin: 2,
   },
   metricLabel: {
     fontSize: 12,
@@ -2044,7 +2254,8 @@ const ownerStyles = StyleSheet.create({
   categoryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 14,
+    marginBottom: 4,
   },
   categoryCard: {
     flex: 1,
@@ -2055,6 +2266,7 @@ const ownerStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
     alignItems: 'center',
+    margin: 2,
   },
   categoryLabel: {
     fontSize: 13,
@@ -2064,7 +2276,7 @@ const ownerStyles = StyleSheet.create({
     textAlign: 'center',
   },
   monthSection: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   monthTitle: {
     fontSize: 16,
@@ -2087,8 +2299,8 @@ const ownerStyles = StyleSheet.create({
     color: '#2563eb',
   },
   fuelMonthCard: {
-    marginBottom: 12,
-    padding: 12,
+    marginBottom: 14,
+    padding: 14,
   },
   mutedText: {
     fontSize: 14,
@@ -2098,7 +2310,22 @@ const ownerStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 12,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  exportAndShareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+  },
+  exportAndShareBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
   exportPrimaryBtn: {
     flexDirection: 'row',

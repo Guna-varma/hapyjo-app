@@ -10,6 +10,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
@@ -606,11 +607,16 @@ const surveySummaryStyles = StyleSheet.create({
     borderBottomWidth: 1,
     borderTopColor: colors.border,
     borderBottomColor: colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 2,
+    ...Platform.select({
+      web: { boxShadow: '0 1px 3px rgba(0,0,0,0.06)' as const },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 3,
+        elevation: 2,
+      },
+    }),
   },
   summaryHeader: {
     flexDirection: 'row',

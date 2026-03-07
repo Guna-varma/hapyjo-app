@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Pressable, StyleSheet, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { SiteCard } from '@/components/sites/SiteCard';
 import { Header } from '@/components/ui/Header';
@@ -568,6 +568,33 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
 });
 
+const headerButtonShadow = Platform.select({
+  web: { boxShadow: '0 4px 8px rgba(37,99,235,0.25)' as const },
+  default: {
+    shadowColor: '#2563eb',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+})!;
+
+const cardSoftShadow = Platform.select({
+  web: { boxShadow: '0 1px 2px rgba(15,23,42,0.04)' as const },
+  default: { shadowOpacity: 0.04, elevation: 1 },
+})!;
+
+const modalSheetShadow = Platform.select({
+  web: { boxShadow: '0 8px 24px rgba(0,0,0,0.15)' as const },
+  default: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+})!;
+
 const ownerStyles = StyleSheet.create({
   headerBtn: {
     backgroundColor: colors.primary,
@@ -577,11 +604,7 @@ const ownerStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 48,
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
+    ...headerButtonShadow,
   },
   headerBtnText: { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.2 },
   section: { marginBottom: layout.cardSpacingVertical },
@@ -589,7 +612,7 @@ const ownerStyles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: layout.grid },
   dateRow: { flexDirection: 'row', gap: layout.grid },
   flex1: { flex: 1 },
-  cardSoft: { borderColor: colors.gray200, shadowOpacity: 0.04, elevation: 1 },
+  cardSoft: { borderColor: colors.gray200, ...cardSoftShadow },
   quickCard: { marginBottom: layout.cardSpacingVertical, backgroundColor: colors.gray50 },
   quickTitle: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: layout.grid },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: layout.grid },
@@ -762,11 +785,7 @@ const ownerStyles = StyleSheet.create({
     flex: 1,
     minHeight: 320,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 8,
+    ...modalSheetShadow,
   },
   rateModalKAV: { flex: 1, maxHeight: '100%' },
   rateModalHeader: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.border },

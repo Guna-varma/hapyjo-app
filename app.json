@@ -74,8 +74,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "7e8c7f84-33b9-4891-9d3c-a15b253f962d"
+        "projectId": "c6e446f8-f580-4fd4-8b15-4247e40cf563"
       }
-    }
+    },
+    "owner": "gunavarma009"
   }
 }

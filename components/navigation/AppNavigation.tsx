@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform, StatusBar, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform, StatusBar, Alert, Dimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
@@ -58,8 +58,11 @@ const TAB_CONFIG: Record<TabId, { labelKey: string; icon: typeof LayoutDashboard
 /** Top inset so header bar and screen content render below the system status bar (Android notch/punch-hole safe). */
 function useTopSafeInset(): number {
   const insets = useSafeAreaInsets();
-  const fallback = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 28) : 0;
-  return Math.max(insets.top, fallback);
+  if (Platform.OS === 'android') {
+    // Prefer runtime inset; fallback to status bar height only when inset is unavailable.
+    return insets.top > 0 ? insets.top : (StatusBar.currentHeight ?? 0);
+  }
+  return insets.top;
 }
 
 export function AppNavigation() {
@@ -169,11 +172,20 @@ export function AppNavigation() {
   const footerJustify = tabCount <= 3 ? 'center' : tabCount <= 5 ? 'space-evenly' : 'flex-start';
   const footerScrollable = tabCount >= 6;
 
-  const bottomTabPadding = Math.max(theme.tabPaddingV, insets.bottom || 0);
+  const androidNavFallback = Math.max(
+    0,
+    Dimensions.get('screen').height - Dimensions.get('window').height
+  );
+  const rawBottomInset = Platform.OS === 'ios'
+    ? Math.max(0, insets.bottom)
+    : (insets.bottom > 0 ? insets.bottom : androidNavFallback);
+  const bottomSystemInset = Math.min(rawBottomInset, Platform.OS === 'ios' ? 48 : 40);
+  const bottomTabPadding = theme.tabPaddingV + bottomSystemInset;
+  const tabBarReservedHeight = dimensions.minTouchHeight + theme.spacingSm + bottomTabPadding + 12;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['left', 'right']}>
-      <View style={{ flex: 1, minHeight: 0, paddingTop: topInset }}>
+      <View style={{ flex: 1, minHeight: 0, paddingTop: topInset, paddingBottom: tabBarReservedHeight }}>
         {/* Compact top bar: Refresh + Language – minimal height, no dead space */}
         <View
           style={{
@@ -181,9 +193,8 @@ export function AppNavigation() {
             justifyContent: 'space-between',
             alignItems: 'center',
             paddingHorizontal: theme.screenPadding,
-            paddingVertical: 4,
-            minHeight: 36,
-            maxHeight: 36,
+            paddingVertical: 6,
+            minHeight: 52,
             backgroundColor: 'transparent',
           }}
         >
@@ -245,7 +256,20 @@ export function AppNavigation() {
       </View>
 
       {/* Bottom Tab Bar – responsive padding for all Android/iOS device sizes */}
-      <View style={{ backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: theme.spacingSm, paddingBottom: bottomTabPadding, paddingHorizontal: theme.tabPaddingH }}>
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: colors.surface,
+          borderTopWidth: 1,
+          borderTopColor: colors.border,
+          paddingTop: theme.spacingSm,
+          paddingBottom: bottomTabPadding,
+          paddingHorizontal: theme.tabPaddingH,
+        }}
+      >
         {footerScrollable ? (
           <ScrollView
             horizontal

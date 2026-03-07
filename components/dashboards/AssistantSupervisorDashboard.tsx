@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions, ScrollView, Platform, Linking } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailScreen } from '@/components/tasks/TaskDetailScreen';
@@ -20,7 +20,6 @@ import { generateId } from '@/lib/id';
 import { getInitialStatusForVehicleType, getCompletedStatus, getEffectiveDurationHours, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AssignedTripApprovalModal } from '@/components/trips/AssignedTripApprovalModal';
-import { Linking } from 'react-native';
 
 function normalizeId(id: string) {
   return String(id ?? '').trim();
@@ -891,6 +890,28 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   );
 }
 
+const elevatedCardShadow = Platform.select({
+  web: { boxShadow: '0 2px 8px rgba(0,0,0,0.06)' as const },
+  default: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+})!;
+
+const softCardShadow = Platform.select({
+  web: { boxShadow: '0 1px 4px rgba(0,0,0,0.04)' as const },
+  default: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+})!;
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -1027,11 +1048,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+    ...elevatedCardShadow,
   },
   siteCardTablet: {
     maxWidth: 720,
@@ -1190,11 +1207,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
+    ...softCardShadow,
   },
   teamRow: {
     flexDirection: 'row',
@@ -1332,11 +1345,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
+    ...softCardShadow,
   },
   actionRow: {
     flexDirection: 'row',
