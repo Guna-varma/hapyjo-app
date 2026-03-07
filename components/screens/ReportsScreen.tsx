@@ -18,6 +18,7 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { formatAmount } from '@/lib/currency';
 import { canSeeFinancialSummary, isReportsReadOnly } from '@/lib/rbac';
+import { buildFinancialSummary } from '@/lib/financeSummary';
 import {
   FileText,
   TrendingUp,
@@ -360,6 +361,19 @@ export function ReportsScreen() {
     { id: 'site_performance', labelKey: 'reports_site_perf', Icon: TrendingUp },
   ];
 
+  const financialSummary = useMemo(
+    () => buildFinancialSummary({ sites, surveys, expenses }),
+    [sites, surveys, expenses]
+  );
+  const siteExpenseById = useMemo(
+    () =>
+      sites.reduce<Record<string, number>>((acc, site) => {
+        acc[site.id] = financialSummary.bySiteId[site.id]?.expensesRwf ?? 0;
+        return acc;
+      }, {}),
+    [sites, financialSummary.bySiteId]
+  );
+
   // Single source of truth: budget from sites, spent from expenses (sync with actual data)
   const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
   const totalSpent = expenses.reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
@@ -441,20 +455,15 @@ export function ReportsScreen() {
     actualFuelByVehicle[v.id] = fromTrips + fromSessions;
   });
 
-  const totalSpentAll = sites.reduce((sum, s) => sum + (s.spent ?? 0), 0);
-  const totalBudgetAll = sites.reduce((sum, s) => sum + (s.budget ?? 0), 0);
-  const remainingBudgetAll = Math.max(0, totalBudgetAll - totalSpentAll);
-  const totalExpensesAll = expenses.reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
+  const totalSpentAll = financialSummary.totals.expensesRwf;
+  const totalBudgetAll = financialSummary.totals.totalBudgetRwf;
+  const remainingBudgetAll = financialSummary.totals.remainingBudgetRwf;
+  const totalExpensesAll = financialSummary.totals.expensesRwf;
   const totalMaintenanceAll = expenses
     .filter((e) => e.expenseCategory === 'maintenance')
     .reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
-  const revenueAll = surveys
-    .filter((s) => s.status === 'approved')
-    .reduce((sum, s) => {
-      const site = sites.find((x) => x.id === s.siteId);
-      return sum + (s.volumeM3 * (site?.contractRateRwf ?? 0));
-    }, 0);
-  const netProfitAll = revenueAll - totalExpensesAll;
+  const revenueAll = financialSummary.totals.revenueRwf;
+  const netProfitAll = financialSummary.totals.profitRwf;
 
   // Live data for Operations tab (not from saved reports)
   const activeSitesCount = sites.filter((s) => s.status === 'active').length;
@@ -513,7 +522,7 @@ export function ReportsScreen() {
         csvEscape(s.expectedEndDate ?? ''),
         csvEscape(daysRemaining(s.expectedEndDate) ?? ''),
         csvEscape(s.budget ?? 0),
-        csvEscape(s.spent ?? 0),
+        csvEscape(siteExpenseById[s.id] ?? 0),
         csvEscape(s.progress ?? 0),
         csvEscape((s.contractRateRwf ?? 0) > 0 ? String(s.contractRateRwf) : t('owner_contract_rate_not_set')),
       ].join(','));
@@ -601,7 +610,7 @@ export function ReportsScreen() {
           csvEscape(s.name ?? ''),
           csvEscape(s.location ?? ''),
           csvEscape(s.budget ?? 0),
-          csvEscape(s.spent ?? 0),
+          csvEscape(siteExpenseById[s.id] ?? 0),
           csvEscape((s.contractRateRwf ?? 0) > 0 ? `${(s.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')),
         ].join(',')),
       ];
@@ -666,7 +675,7 @@ export function ReportsScreen() {
         ...sites.map((s) => [
           csvEscape(s.name ?? ''),
           csvEscape(s.location ?? ''),
-          csvEscape(formatAmount(s.spent ?? 0, true)),
+          csvEscape(formatAmount(siteExpenseById[s.id] ?? 0, true)),
           csvEscape((s.contractRateRwf ?? 0) > 0 ? `${(s.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')),
         ].join(',')),
         '',
@@ -868,7 +877,14 @@ export function ReportsScreen() {
                         <View key={ym} style={ownerStyles.monthSection}>
                           <Text style={ownerStyles.monthTitle}>{formatPeriodLabel(ym)}</Text>
                           {(sitesByMonth.get(ym) ?? []).map((site) => (
-                            <SitePerformanceCard key={site.id} site={site} formatAmount={formatAmount} t={t} reportCardStyles={reportCardStyles} ownerStyles={ownerStyles} />
+                            <SitePerformanceCard
+                              key={site.id}
+                              site={{ ...site, spent: siteExpenseById[site.id] ?? 0 }}
+                              formatAmount={formatAmount}
+                              t={t}
+                              reportCardStyles={reportCardStyles}
+                              ownerStyles={ownerStyles}
+                            />
                           ))}
                         </View>
                       ))}
@@ -881,7 +897,14 @@ export function ReportsScreen() {
                 })()}
                 <Text style={[reportCardStyles.sectionTitleText, { marginTop: 20 }]} className="mb-3">{t('reports_current_site_perf')}</Text>
                 {sites.filter((s) => s.status === 'active').sort((a, b) => (a.expectedEndDate || '').localeCompare(b.expectedEndDate || '')).map((site) => (
-                  <SitePerformanceCard key={site.id} site={site} formatAmount={formatAmount} t={t} reportCardStyles={reportCardStyles} ownerStyles={ownerStyles} />
+                  <SitePerformanceCard
+                    key={site.id}
+                    site={{ ...site, spent: siteExpenseById[site.id] ?? 0 }}
+                    formatAmount={formatAmount}
+                    t={t}
+                    reportCardStyles={reportCardStyles}
+                    ownerStyles={ownerStyles}
+                  />
                 ))}
               </View>
             )}
@@ -947,7 +970,7 @@ export function ReportsScreen() {
                         <Text style={reportCardStyles.siteCardLocation}>{site.location}</Text>
                         <View style={reportCardStyles.siteCardRow}>
                           <Text style={reportCardStyles.siteCardLabel}>{t('reports_total_site_expense')}</Text>
-                          <Text style={reportCardStyles.siteCardValue}>{formatAmount(site.spent ?? 0, true)}</Text>
+                          <Text style={reportCardStyles.siteCardValue}>{formatAmount(siteExpenseById[site.id] ?? 0, true)}</Text>
                         </View>
                         <View style={reportCardStyles.siteCardRow}>
                           <Text style={reportCardStyles.siteCardLabel}>{t('reports_contract_rate_rwf_m3')}</Text>
@@ -1052,7 +1075,7 @@ export function ReportsScreen() {
           <View className="mb-4">
             <Text className="text-sm font-semibold text-slate-600 mb-2">{t('reports_live_sites_title')}</Text>
             {sites.map((site) => {
-              const siteSpent = site.spent ?? 0;
+              const siteSpent = siteExpenseById[site.id] ?? 0;
               const siteBudget = site.budget ?? 0;
               const utilization = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
               return (
@@ -1401,7 +1424,7 @@ export function ReportsScreen() {
           <View className="mb-4">
             <Text className="text-lg font-bold text-gray-900 mb-3">{t('reports_current_site_performance')}</Text>
             {sites.map((site) => {
-              const siteSpent = site.spent ?? 0;
+              const siteSpent = siteExpenseById[site.id] ?? 0;
               const siteBudget = site.budget ?? 0;
               const utilization = siteBudget > 0 ? Math.round((siteSpent / siteBudget) * 100) : 0;
               const progressPct = Math.min(100, Math.max(0, site.progress ?? 0));

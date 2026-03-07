@@ -14,6 +14,7 @@ import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { colors, layout, form, radius } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
+import { buildFinancialSummary } from '@/lib/financeSummary';
 
 export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const { t, locale, setLocale } = useLocale();
@@ -25,8 +26,8 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const [rateInput, setRateInput] = useState('');
   const [rateSaving, setRateSaving] = useState(false);
   const [rateError, setRateError] = useState<string | null>(null);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom] = useState('');
+  const [dateTo] = useState('');
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const [tasksSiteId, setTasksSiteId] = useState<string | null>(null);
 
@@ -40,13 +41,23 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
     };
   }, [dateFrom, dateTo]);
 
-  const surveysInRange = useMemo(
-    () => surveys.filter((s) => s.status === 'approved' && inRange(s.createdAt)),
-    [surveys, inRange]
-  );
   const productionSurveysInRange = useMemo(
     () => surveys.filter((s) => s.status === 'approved' && inRange(s.surveyDate)),
     [surveys, inRange]
+  );
+  const financialSummary = useMemo(
+    () =>
+      buildFinancialSummary({
+        sites,
+        surveys,
+        expenses,
+        dateRange: { from: dateFrom || undefined, to: dateTo || undefined },
+      }),
+    [sites, surveys, expenses, dateFrom, dateTo]
+  );
+  const siteFinancialRows = useMemo(
+    () => financialSummary.sites.filter((site) => site.isKnownSite),
+    [financialSummary.sites]
   );
   const dailyProductionData = useMemo(() => {
     const byDate = new Map<string, number>();
@@ -67,20 +78,15 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
     }
     return siteVol.filter((x) => x.volumeM3 > 0).sort((a, b) => b.volumeM3 - a.volumeM3).slice(0, 5);
   }, [sites, productionSurveysInRange]);
-  const expensesInRange = useMemo(() => expenses.filter((e) => !e.date || inRange(e.date)), [expenses, inRange]);
-
-  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
-  const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
-  const remaining = Math.max(0, totalBudget - totalSpent);
-  const utilizationRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
-  const revenue = sites.reduce((sum, site) => {
-    const siteVolume = surveysInRange.filter((s) => s.siteId === site.id).reduce((v, s) => v + s.volumeM3, 0);
-    return sum + siteVolume * (site.contractRateRwf ?? 0);
-  }, 0);
-  const totalCost = expensesInRange.reduce((sum, e) => sum + e.amountRwf, 0);
-  const profit = revenue - totalCost;
-
-  const hasUnsetContractRates = sites.some((site) => (site.contractRateRwf ?? 0) <= 0);
+  const totalBudget = financialSummary.totals.totalBudgetRwf;
+  const totalSpent = financialSummary.totals.expensesRwf;
+  const remaining = financialSummary.totals.remainingBudgetRwf;
+  const utilizationRate = financialSummary.totals.utilizationPct;
+  const revenue = financialSummary.totals.revenueRwf;
+  const totalCost = financialSummary.totals.expensesRwf;
+  const totalFuelCost = financialSummary.totals.fuelExpensesRwf;
+  const totalGeneralCost = financialSummary.totals.generalExpensesRwf;
+  const profit = financialSummary.totals.profitRwf;
 
   const openRateModal = (siteId?: string) => {
     setRateError(null);
@@ -283,6 +289,70 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
                   {(site.contractRateRwf ?? 0) > 0 ? `${(site.contractRateRwf ?? 0).toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')}
                 </Text>
               </TouchableOpacity>
+            ))}
+          </Card>
+        )}
+
+        {siteFinancialRows.length > 0 && (
+          <Card style={[ownerStyles.financeCard, ownerStyles.cardSoft]}>
+            <Text style={ownerStyles.sectionTitle}>{t('dashboard_allocation_per_site')}</Text>
+            <View style={ownerStyles.financeTotalsRow}>
+              <View style={ownerStyles.financeTotalsPill}>
+                <Text style={ownerStyles.financeTotalsLabel}>{t('reports_total_expenses')}</Text>
+                <Text style={ownerStyles.financeTotalsValue}>{formatAmount(totalCost, true)}</Text>
+              </View>
+              <View style={ownerStyles.financeTotalsPill}>
+                <Text style={ownerStyles.financeTotalsLabel}>{t('expenses_category_fuel')}</Text>
+                <Text style={ownerStyles.financeTotalsValue}>{formatAmount(totalFuelCost, true)}</Text>
+              </View>
+              <View style={ownerStyles.financeTotalsPill}>
+                <Text style={ownerStyles.financeTotalsLabel}>{t('reports_expense_general')}</Text>
+                <Text style={ownerStyles.financeTotalsValue}>{formatAmount(totalGeneralCost, true)}</Text>
+              </View>
+            </View>
+            {siteFinancialRows.map((site) => (
+              <View key={site.siteId} style={ownerStyles.financeSiteRow}>
+                <View style={ownerStyles.financeSiteHeader}>
+                  <View style={ownerStyles.financeSiteHeaderLeft}>
+                    <Text style={ownerStyles.financeSiteName}>{site.siteName}</Text>
+                    <Text style={ownerStyles.financeSiteLocation}>{site.location}</Text>
+                  </View>
+                  <View style={ownerStyles.financeProfitWrap}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('dashboard_profit')}</Text>
+                    <Text style={[ownerStyles.financeSiteProfit, site.profitRwf < 0 && ownerStyles.financeSiteProfitNegative]}>
+                      {formatAmount(site.profitRwf, true)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={ownerStyles.financeGrid}>
+                  <View style={ownerStyles.financeGridItem}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('dashboard_work_volume_approved')}</Text>
+                    <Text style={ownerStyles.financeMetricValue}>{site.approvedVolumeM3.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m³</Text>
+                  </View>
+                  <View style={ownerStyles.financeGridItem}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('reports_contract_rate_rwf_m3')}</Text>
+                    <Text style={ownerStyles.financeMetricValue}>
+                      {site.contractRateRwf > 0 ? `${site.contractRateRwf.toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')}
+                    </Text>
+                  </View>
+                  <View style={ownerStyles.financeGridItem}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('dashboard_revenue')}</Text>
+                    <Text style={ownerStyles.financeMetricValue}>{formatAmount(site.revenueRwf, true)}</Text>
+                  </View>
+                  <View style={ownerStyles.financeGridItem}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('reports_total_expenses')}</Text>
+                    <Text style={ownerStyles.financeMetricValue}>{formatAmount(site.expensesRwf, true)}</Text>
+                  </View>
+                  <View style={ownerStyles.financeGridItem}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('expenses_category_fuel')}</Text>
+                    <Text style={ownerStyles.financeMetricValue}>{formatAmount(site.fuelExpensesRwf, true)}</Text>
+                  </View>
+                  <View style={ownerStyles.financeGridItem}>
+                    <Text style={ownerStyles.financeMetricLabel}>{t('site_card_progress')}</Text>
+                    <Text style={ownerStyles.financeMetricValue}>{site.progressPct.toFixed(0)}%</Text>
+                  </View>
+                </View>
+              </View>
             ))}
           </Card>
         )}
@@ -588,6 +658,94 @@ const ownerStyles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  financeCard: {
+    marginBottom: layout.cardSpacingVertical,
+    backgroundColor: colors.gray50,
+  },
+  financeTotalsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
+  },
+  financeTotalsPill: {
+    flexGrow: 1,
+    minWidth: 100,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  financeTotalsLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  financeTotalsValue: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  financeSiteRow: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    padding: 12,
+    marginBottom: 10,
+  },
+  financeSiteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  financeSiteHeaderLeft: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  financeSiteName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  financeSiteLocation: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  financeProfitWrap: {
+    alignItems: 'flex-end',
+  },
+  financeSiteProfit: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  financeSiteProfitNegative: {
+    color: '#dc2626',
+  },
+  financeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 10,
+    justifyContent: 'space-between',
+  },
+  financeGridItem: {
+    width: '48%',
+  },
+  financeMetricLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  financeMetricValue: {
+    fontSize: 13,
+    color: colors.text,
+    fontWeight: '600',
   },
   // Contract rate modal – lavish UI
   rateModalOverlay: {

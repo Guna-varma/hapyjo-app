@@ -8,12 +8,11 @@ import {
   Image,
   StyleSheet,
   TouchableOpacity,
-  Platform,
   Linking,
+  Alert,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import { useLocale } from '@/context/LocaleContext';
+import { saveImageToDevice } from '@/lib/saveImageToDevice';
 import { colors, radius, spacing } from '@/theme/tokens';
 import type { WorkPhoto } from '@/types';
 
@@ -41,23 +40,10 @@ export function WorkPhotoDetailModal({
 
   const handleDownload = async () => {
     try {
-      if (Platform.OS === 'web') {
-        const a = document.createElement('a');
-        a.href = photo.photoUrl;
-        a.download = `work-photo-${photo.id}.jpg`;
-        a.rel = 'noopener noreferrer';
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      } else {
-        const filename = (FileSystem.documentDirectory ?? '') + `work-photo-${photo.id}.jpg`;
-        const { uri } = await FileSystem.downloadAsync(photo.photoUrl, filename);
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg' });
-      }
+      await saveImageToDevice(photo.photoUrl, `work-photo-${photo.id}.jpg`);
+      Alert.alert('', t('image_saved_to_device'));
     } catch {
-      if (Platform.OS !== 'web') Linking.openURL(photo.photoUrl);
+      Alert.alert(t('alert_error'), t('image_save_failed'));
     }
   };
 

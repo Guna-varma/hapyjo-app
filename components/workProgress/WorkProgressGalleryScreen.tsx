@@ -12,14 +12,17 @@ import { useLocale } from '@/context/LocaleContext';
 import { useResponsiveTheme } from '@/theme/responsive';
 import { colors, radius, spacing } from '@/theme/tokens';
 import { ChevronLeft } from 'lucide-react-native';
+import { Select } from '@/components/ui/Select';
 import { WorkPhotoDetailModal } from './WorkPhotoDetailModal';
 import type { WorkPhoto } from '@/types';
 
 const PAGE_SIZE = 20;
+const ALL_SITES_VALUE = '';
 
 export function WorkProgressGalleryScreen({
   workPhotos,
   sites,
+  allowedSiteIds = [],
   users,
   onBack,
   onRefresh,
@@ -27,6 +30,8 @@ export function WorkProgressGalleryScreen({
 }: {
   workPhotos: WorkPhoto[];
   sites: { id: string; name: string }[];
+  /** Sites the current user is allowed to see; dropdown shows only these. If empty, all passed sites are used. */
+  allowedSiteIds?: string[];
   users: { id: string; name: string }[];
   onBack: () => void;
   onRefresh?: () => Promise<void>;
@@ -36,12 +41,26 @@ export function WorkProgressGalleryScreen({
   const theme = useResponsiveTheme();
   const [selectedPhoto, setSelectedPhoto] = useState<WorkPhoto | null>(null);
   const [page, setPage] = useState(0);
+  const [selectedSiteId, setSelectedSiteId] = useState<string>(ALL_SITES_VALUE);
+
+  const siteOptions = useMemo(() => {
+    const list = allowedSiteIds.length > 0 ? sites.filter((s) => allowedSiteIds.includes(s.id)) : sites;
+    return [
+      { value: ALL_SITES_VALUE as const, label: t('work_photo_filter_all_sites') },
+      ...list.map((s) => ({ value: s.id, label: s.name })),
+    ];
+  }, [sites, allowedSiteIds, t]);
+
+  const filteredBySite = useMemo(() => {
+    if (!selectedSiteId || selectedSiteId === ALL_SITES_VALUE) return workPhotos;
+    return workPhotos.filter((p) => p.siteId === selectedSiteId);
+  }, [workPhotos, selectedSiteId]);
 
   const paginated = useMemo(() => {
     const start = page * PAGE_SIZE;
-    return workPhotos.slice(start, start + PAGE_SIZE);
-  }, [workPhotos, page]);
-  const totalPages = Math.max(1, Math.ceil(workPhotos.length / PAGE_SIZE));
+    return filteredBySite.slice(start, start + PAGE_SIZE);
+  }, [filteredBySite, page]);
+  const totalPages = Math.max(1, Math.ceil(filteredBySite.length / PAGE_SIZE));
   const hasMore = page < totalPages - 1;
   const hasPrev = page > 0;
 
@@ -59,6 +78,22 @@ export function WorkProgressGalleryScreen({
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('work_photo_gallery_title')}</Text>
         <Text style={styles.headerSubtitle}>{t('work_photo_gallery_subtitle')}</Text>
+        {siteOptions.length > 1 && (
+          <View style={styles.filterRow}>
+            <Text style={styles.filterLabel}>{t('work_photo_filter_site')}</Text>
+            <Select<string>
+              placeholder={t('work_photo_filter_all_sites')}
+              options={siteOptions}
+              value={selectedSiteId || ALL_SITES_VALUE}
+              onChange={(v) => {
+                setSelectedSiteId(v);
+                setPage(0);
+              }}
+              containerStyle={styles.selectContainer}
+            />
+          </View>
+        )}
+        <Text style={styles.retentionNote}>{t('work_photo_gallery_retention')}</Text>
       </View>
       <ScrollView
         style={styles.scroll}
@@ -69,10 +104,14 @@ export function WorkProgressGalleryScreen({
           ) : undefined
         }
       >
-        {workPhotos.length === 0 ? (
+        {filteredBySite.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>{t('work_photo_no_photos')}</Text>
-            <Text style={styles.emptyMessage}>{t('work_photo_no_photos_message')}</Text>
+            <Text style={styles.emptyMessage}>
+              {selectedSiteId && selectedSiteId !== ALL_SITES_VALUE
+                ? t('work_photo_no_photos_for_site')
+                : t('work_photo_no_photos_message')}
+            </Text>
           </View>
         ) : (
           <>
@@ -159,6 +198,10 @@ function makeStyles(theme: ReturnType<typeof useResponsiveTheme>) {
     backText: { fontSize: 16, color: colors.text, marginLeft: 2 },
     headerTitle: { fontSize: 20, fontWeight: '700', color: colors.text },
     headerSubtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+    filterRow: { marginTop: spacing.md },
+    filterLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.3 },
+    selectContainer: { marginBottom: 0 },
+    retentionNote: { fontSize: 11, color: colors.textMuted, marginTop: spacing.xs },
     scroll: { flex: 1 },
     scrollContent: { padding: theme.screenPadding, paddingBottom: theme.spacingXl },
     empty: { paddingVertical: theme.spacingXl, alignItems: 'center' },

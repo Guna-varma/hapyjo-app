@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, useWindowDimensions, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
@@ -7,34 +7,32 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { colors, layout } from '@/theme/tokens';
 import { formatAmount } from '@/lib/currency';
-import { Banknote, FileText, Lock, TrendingUp } from 'lucide-react-native';
+import { Banknote, FileText, Lock, TrendingUp, Fuel, PieChart } from 'lucide-react-native';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
+import { buildFinancialSummary } from '@/lib/financeSummary';
 
 const BREAKPOINT_SMALL = 400;
 
 export function AccountantDashboard(_props: DashboardNavProps = {}) {
   const { t } = useLocale();
   const { width } = useWindowDimensions();
-  const { sites, surveys } = useMockAppStore();
-  const totalBudget = sites.reduce((sum, site) => sum + (site.budget ?? 0), 0);
-  const totalSpent = sites.reduce((sum, site) => sum + (site.spent ?? 0), 0);
-  const remaining = Math.max(0, totalBudget - totalSpent);
-  const revenue = sites.reduce((sum, site) => {
-    const siteVolume = surveys
-      .filter((s) => s.status === 'approved' && s.siteId === site.id)
-      .reduce((v, s) => v + s.volumeM3, 0);
-    return sum + siteVolume * (site.contractRateRwf ?? 0);
-  }, 0);
-  const totalCost = totalSpent;
-  const profit = revenue - totalCost;
+  const { sites, surveys, expenses } = useMockAppStore();
+  const financialSummary = useMemo(
+    () => buildFinancialSummary({ sites, surveys, expenses }),
+    [sites, surveys, expenses]
+  );
+  const siteFinancialRows = useMemo(
+    () => financialSummary.sites.filter((site) => site.isKnownSite),
+    [financialSummary.sites]
+  );
 
-  const siteAllocations = sites.map((site) => {
-    const siteVolume = surveys
-      .filter((s) => s.status === 'approved' && s.siteId === site.id)
-      .reduce((v, s) => v + s.volumeM3, 0);
-    const siteRevenue = siteVolume * (site.contractRateRwf ?? 0);
-    return { site, budget: site.budget ?? 0, spent: site.spent ?? 0, revenue: siteRevenue };
-  });
+  const totalBudget = financialSummary.totals.totalBudgetRwf;
+  const totalSpent = financialSummary.totals.expensesRwf;
+  const remaining = financialSummary.totals.remainingBudgetRwf;
+  const revenue = financialSummary.totals.revenueRwf;
+  const totalFuel = financialSummary.totals.fuelExpensesRwf;
+  const totalGeneral = financialSummary.totals.generalExpensesRwf;
+  const profit = financialSummary.totals.profitRwf;
 
   const isSmall = width < BREAKPOINT_SMALL;
   const cardContainerStyle = isSmall ? styles.cardColumn : styles.cardRow;
@@ -42,9 +40,11 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
   const metricCards = [
     { icon: <Banknote size={24} color="#10B981" />, label: t('dashboard_total_budget'), value: formatAmount(totalBudget, true) },
     { icon: <Banknote size={24} color="#8B5CF6" />, label: t('dashboard_total_spent'), value: formatAmount(totalSpent, true) },
-    { icon: <Banknote size={24} color="#059669" />, label: t('dashboard_remaining'), value: formatAmount(remaining, true) },
+    { icon: <PieChart size={24} color="#0f766e" />, label: t('dashboard_remaining'), value: formatAmount(remaining, true) },
     { icon: <TrendingUp size={24} color="#3B82F6" />, label: t('dashboard_revenue'), value: formatAmount(revenue, true) },
-    { icon: <Banknote size={24} color="#DC2626" />, label: t('dashboard_profit'), value: formatAmount(profit, true), highlight: profit < 0 },
+    { icon: <Fuel size={24} color="#2563EB" />, label: t('expenses_category_fuel'), value: formatAmount(totalFuel, true) },
+    { icon: <Banknote size={24} color="#0369A1" />, label: t('reports_expense_general'), value: formatAmount(totalGeneral, true) },
+    { icon: <Banknote size={24} color={profit >= 0 ? '#059669' : '#DC2626'} />, label: t('dashboard_profit'), value: formatAmount(profit, true), highlight: profit < 0 },
   ];
 
   return (
@@ -59,7 +59,22 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
           <Text style={styles.infoHint}>{t('dashboard_read_only_hint')}</Text>
         </Card>
 
-        <Text style={styles.sectionTitle}>{t('dashboard_financial_summary')}</Text>
+        <Card style={styles.heroCard}>
+          <Text style={styles.heroTitle}>{t('dashboard_financial_summary')}</Text>
+          <Text style={styles.heroValue}>{formatAmount(profit, true)}</Text>
+          <Text style={styles.heroCaption}>{t('reports_net_profit')}</Text>
+          <View style={styles.heroStatsRow}>
+            <View style={styles.heroStatItem}>
+              <Text style={styles.heroStatLabel}>{t('dashboard_revenue')}</Text>
+              <Text style={styles.heroStatValue}>{formatAmount(revenue, true)}</Text>
+            </View>
+            <View style={styles.heroStatItem}>
+              <Text style={styles.heroStatLabel}>{t('reports_total_expenses')}</Text>
+              <Text style={styles.heroStatValue}>{formatAmount(totalSpent, true)}</Text>
+            </View>
+          </View>
+        </Card>
+
         <View style={cardContainerStyle}>
           {metricCards.map((item, index) => (
             <Card key={index} style={[styles.metricCard, isSmall && styles.metricCardFull]}>
@@ -74,23 +89,46 @@ export function AccountantDashboard(_props: DashboardNavProps = {}) {
           ))}
         </View>
 
-        {sites.length > 0 && (
+        {siteFinancialRows.length > 0 && (
           <>
             <Text style={styles.sectionTitle}>{t('dashboard_allocation_per_site')}</Text>
-            {siteAllocations.map(({ site, budget, spent, revenue }) => (
-              <Card key={site.id} style={styles.siteAllocCard}>
-                <Text style={styles.siteAllocName}>{site.name}</Text>
-                <View style={styles.siteAllocRow}>
-                  <Text style={styles.siteAllocLabel}>{t('dashboard_total_budget')}</Text>
-                  <Text style={styles.siteAllocValue}>{formatAmount(budget, true)}</Text>
+            {siteFinancialRows.map((site) => (
+              <Card key={site.siteId} style={styles.siteAllocCard}>
+                <View style={styles.siteHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.siteAllocName}>{site.siteName}</Text>
+                    <Text style={styles.siteAllocLocation}>{site.location}</Text>
+                  </View>
+                  <View style={styles.siteProfitWrap}>
+                    <Text style={styles.siteAllocLabel}>{t('dashboard_profit')}</Text>
+                    <Text style={[styles.siteProfitValue, site.profitRwf < 0 && styles.metricValueNegative]}>{formatAmount(site.profitRwf, true)}</Text>
+                  </View>
                 </View>
-                <View style={styles.siteAllocRow}>
-                  <Text style={styles.siteAllocLabel}>{t('dashboard_total_spent')}</Text>
-                  <Text style={styles.siteAllocValue}>{formatAmount(spent, true)}</Text>
-                </View>
-                <View style={styles.siteAllocRow}>
-                  <Text style={styles.siteAllocLabel}>{t('dashboard_revenue')}</Text>
-                  <Text style={styles.siteAllocValue}>{formatAmount(revenue, true)}</Text>
+                <View style={styles.siteGrid}>
+                  <View style={styles.siteGridItem}>
+                    <Text style={styles.siteAllocLabel}>{t('dashboard_work_volume_approved')}</Text>
+                    <Text style={styles.siteAllocValue}>{site.approvedVolumeM3.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m³</Text>
+                  </View>
+                  <View style={styles.siteGridItem}>
+                    <Text style={styles.siteAllocLabel}>{t('reports_contract_rate_rwf_m3')}</Text>
+                    <Text style={styles.siteAllocValue}>{site.contractRateRwf > 0 ? `${site.contractRateRwf.toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')}</Text>
+                  </View>
+                  <View style={styles.siteGridItem}>
+                    <Text style={styles.siteAllocLabel}>{t('dashboard_revenue')}</Text>
+                    <Text style={styles.siteAllocValue}>{formatAmount(site.revenueRwf, true)}</Text>
+                  </View>
+                  <View style={styles.siteGridItem}>
+                    <Text style={styles.siteAllocLabel}>{t('reports_total_expenses')}</Text>
+                    <Text style={styles.siteAllocValue}>{formatAmount(site.expensesRwf, true)}</Text>
+                  </View>
+                  <View style={styles.siteGridItem}>
+                    <Text style={styles.siteAllocLabel}>{t('expenses_category_fuel')}</Text>
+                    <Text style={styles.siteAllocValue}>{formatAmount(site.fuelExpensesRwf, true)}</Text>
+                  </View>
+                  <View style={styles.siteGridItem}>
+                    <Text style={styles.siteAllocLabel}>{t('site_card_progress')}</Text>
+                    <Text style={styles.siteAllocValue}>{site.progressPct.toFixed(0)}%</Text>
+                  </View>
                 </View>
               </Card>
             ))}
@@ -136,13 +174,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   metricLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.text,
     marginLeft: 8,
   },
   metricValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: colors.text,
   },
@@ -174,6 +212,51 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  heroCard: {
+    marginBottom: layout.cardSpacingVertical,
+    backgroundColor: '#0f172a',
+    borderColor: '#1e293b',
+  },
+  heroTitle: {
+    color: '#93c5fd',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  heroValue: {
+    marginTop: 6,
+    color: '#f8fafc',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  heroCaption: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  heroStatsRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    gap: 16,
+  },
+  heroStatItem: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: '#111827',
+  },
+  heroStatLabel: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  heroStatValue: {
+    color: '#f8fafc',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   reportsCard: {
     backgroundColor: colors.gray100,
     marginBottom: layout.cardSpacingVertical,
@@ -187,17 +270,47 @@ const styles = StyleSheet.create({
     marginBottom: layout.cardSpacingVertical,
     backgroundColor: colors.gray50,
   },
+  siteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
   siteAllocName: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 8,
   },
-  siteAllocRow: {
+  siteAllocLocation: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  siteProfitWrap: {
+    alignItems: 'flex-end',
+  },
+  siteProfitValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  siteGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    rowGap: 10,
   },
-  siteAllocLabel: { fontSize: 13, color: colors.textSecondary },
-  siteAllocValue: { fontSize: 14, fontWeight: '600', color: colors.text },
+  siteGridItem: {
+    width: '48%',
+  },
+  siteAllocLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  siteAllocValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
 });

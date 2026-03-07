@@ -30,6 +30,10 @@ import { FilterChips } from '@/components/ui';
 import { WorkProgressGalleryScreen } from '@/components/workProgress/WorkProgressGalleryScreen';
 
 const ALL_SITES_VALUE = '';
+const WORK_PHOTO_RETENTION_DAYS = 7;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** Owner & Head Supervisor see only photos uploaded by Surveyor or Assistant Supervisor. */
+const UPLOADER_ROLES_FOR_OWNER_HS: string[] = ['surveyor', 'assistant_supervisor'];
 
 export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
   const { user } = useAuth();
@@ -52,14 +56,43 @@ export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
     return fromAssignments;
   }, [user?.id, user?.role, siteAssignments, sites]);
   const teamRoles = ['driver_truck', 'driver_machine', 'surveyor'];
+  /** Sites this user is allowed to see in the gallery (for site dropdown). Owner: all; Head Supervisor / AS / Surveyor: allocated only. */
+  const allowedGallerySiteIds = useMemo(() => {
+    if (user?.role === 'owner') return sites.map((s) => s.id);
+    return mySiteIds.length > 0 ? mySiteIds : sites.map((s) => s.id);
+  }, [user?.role, mySiteIds, sites]);
+
   const filteredWorkPhotos = useMemo(() => {
-    if (user?.role !== 'assistant_supervisor') return workPhotos;
-    return workPhotos.filter(
-      (p) =>
-        mySiteIds.includes(p.siteId) &&
-        teamRoles.includes(users.find((u) => u.id === p.uploadedBy)?.role ?? '')
-    );
-  }, [workPhotos, user?.role, mySiteIds, users]);
+    const cutoff = Date.now() - WORK_PHOTO_RETENTION_DAYS * MS_PER_DAY;
+    const withinRetention = (p: { createdAt: string }) => new Date(p.createdAt).getTime() >= cutoff;
+
+    if (user?.role === 'owner' || user?.role === 'head_supervisor') {
+      return workPhotos.filter(
+        (p) =>
+          withinRetention(p) &&
+          UPLOADER_ROLES_FOR_OWNER_HS.includes(p.userRole) &&
+          (allowedGallerySiteIds.length === 0 || allowedGallerySiteIds.includes(p.siteId))
+      );
+    }
+    if (user?.role === 'assistant_supervisor') {
+      return workPhotos.filter(
+        (p) =>
+          withinRetention(p) &&
+          mySiteIds.includes(p.siteId) &&
+          teamRoles.includes(users.find((u) => u.id === p.uploadedBy)?.role ?? '')
+      );
+    }
+    if (user?.role === 'surveyor') {
+      return workPhotos.filter(
+        (p) =>
+          withinRetention(p) &&
+          mySiteIds.includes(p.siteId) &&
+          p.uploadedBy === user?.id
+      );
+    }
+    return workPhotos.filter(withinRetention);
+  }, [workPhotos, user?.role, user?.id, mySiteIds, allowedGallerySiteIds, users]);
+
   const siteOptions = useMemo(() => {
     const list = user?.role === 'assistant_supervisor' || user?.role === 'surveyor'
       ? sites.filter((s) => mySiteIds.length === 0 || mySiteIds.includes(s.id))
@@ -303,7 +336,8 @@ export function GpsCameraScreen({ onBack }: { onBack?: () => void }) {
         <View style={StyleSheet.absoluteFill}>
           <WorkProgressGalleryScreen
             workPhotos={filteredWorkPhotos}
-            sites={sites}
+            sites={sites.filter((s) => allowedGallerySiteIds.includes(s.id))}
+            allowedSiteIds={allowedGallerySiteIds}
             users={users}
             onBack={() => setShowGallery(false)}
             onRefresh={handleGalleryRefresh}

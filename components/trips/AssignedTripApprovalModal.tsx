@@ -9,6 +9,7 @@ import { View, Text, Modal, TouchableOpacity, TextInput, ScrollView, Image, Aler
 import type { AssignedTrip } from '@/types';
 import type { Vehicle } from '@/types';
 import { getTripPhotoPublicUrl } from '@/lib/tripPhotoStorage';
+import { saveImageToDevice } from '@/lib/saveImageToDevice';
 import { useLocale } from '@/context/LocaleContext';
 
 interface AssignedTripApprovalModalProps {
@@ -36,6 +37,19 @@ export function AssignedTripApprovalModal({
   const [startReading, setStartReading] = useState('');
   const [endReading, setEndReading] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingPhoto, setDownloadingPhoto] = useState<'start' | 'end' | null>(null);
+
+  const handleDownloadPhoto = async (url: string, kind: 'start' | 'end') => {
+    setDownloadingPhoto(kind);
+    try {
+      await saveImageToDevice(url, `trip-${trip?.id ?? 'trip'}-${kind}.jpg`);
+      Alert.alert('', t('image_saved_to_device'));
+    } catch {
+      Alert.alert(t('alert_error'), t('image_save_failed'));
+    } finally {
+      setDownloadingPhoto(null);
+    }
+  };
 
   const isTruck = trip?.vehicleType === 'truck';
   const startNum = parseFloat(startReading);
@@ -123,12 +137,30 @@ export function AssignedTripApprovalModal({
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>{t('trip_approval_start_photo')}</Text>
                   <Image source={{ uri: startPhotoUrl }} style={{ width: '100%', aspectRatio: 1, borderRadius: 8, backgroundColor: '#e2e8f0' }} resizeMode="cover" />
+                  <TouchableOpacity
+                    onPress={() => handleDownloadPhoto(startPhotoUrl, 'start')}
+                    disabled={downloadingPhoto !== null}
+                    style={{ marginTop: 6, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#e2e8f0', borderRadius: 6, alignSelf: 'flex-start' }}
+                  >
+                    <Text style={{ fontSize: 12, color: '#475569', fontWeight: '600' }}>
+                      {downloadingPhoto === 'start' ? t('common_loading') : t('trip_approval_download_photo')}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               ) : null}
               {endPhotoUrl ? (
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>{t('trip_approval_end_photo')}</Text>
                   <Image source={{ uri: endPhotoUrl }} style={{ width: '100%', aspectRatio: 1, borderRadius: 8, backgroundColor: '#e2e8f0' }} resizeMode="cover" />
+                  <TouchableOpacity
+                    onPress={() => handleDownloadPhoto(endPhotoUrl, 'end')}
+                    disabled={downloadingPhoto !== null}
+                    style={{ marginTop: 6, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#e2e8f0', borderRadius: 6, alignSelf: 'flex-start' }}
+                  >
+                    <Text style={{ fontSize: 12, color: '#475569', fontWeight: '600' }}>
+                      {downloadingPhoto === 'end' ? t('common_loading') : t('trip_approval_download_photo')}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               ) : null}
               {!startPhotoUrl && !endPhotoUrl && <Text style={{ fontSize: 14, color: '#94a3b8' }}>{t('trip_approval_no_photos')}</Text>}
