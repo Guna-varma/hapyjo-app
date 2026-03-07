@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -26,7 +27,9 @@ import { generateId } from '@/lib/id';
 import { Play, Square, Fuel, MapPin, Camera, Pause, PlayCircle, CheckCircle } from 'lucide-react-native';
 import { getNextDriverStatus, getEffectiveDurationHours, canEndTrip, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import { categorizeError, ERROR_CATEGORY_TITLE_KEYS } from '@/lib/errorCategories';
+import { TripPhotoCaptureModal } from '@/components/trips/TripPhotoCaptureModal';
 import * as Linking from 'expo-linking';
+import { canSubmitTripEndAction } from '@/lib/tripEndActionGuard';
 import {
   validateAndPrepareWorkPhoto,
   generateThumbnail,
@@ -60,6 +63,26 @@ function getDateKey(iso: string, period: 'day' | 'month' | 'year') {
   return d.slice(0, 4);
 }
 
+/** On web, blob: URLs can become empty when read later. Convert to data URL immediately so bytes are preserved. */
+async function ensureUriHasBytes(uri: string): Promise<string> {
+  if (Platform.OS !== 'web' || !uri.startsWith('blob:')) return uri;
+  try {
+    const res = await fetch(uri);
+    if (!res.ok) throw new Error('Could not read photo.');
+    const blob = await res.blob();
+    if (blob.size === 0) throw new Error('Photo is empty. Please take the photo again.');
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read image data'));
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    if (e instanceof Error && (e.message.includes('empty') || e.message.includes('read'))) throw e;
+    return uri;
+  }
+}
+
 export function DriverTripsScreen() {
   const { user } = useAuth();
   const { t } = useLocale();
@@ -74,6 +97,7 @@ export function DriverTripsScreen() {
     machineSessions,
     assignedTrips,
     updateAssignedTripStatus,
+    updateAssignedTrip,
     addTrip,
     updateTrip,
     addMachineSession,
@@ -141,9 +165,6 @@ export function DriverTripsScreen() {
     acc[vid].hours += m.durationHours ?? 0;
     return acc;
   }, {});
-  const dailyTrips = completedTrips.filter((t) => getDateKey(t.startTime, 'day') === getDateKey(new Date().toISOString(), 'day'));
-  const monthlyTrips = completedTrips.filter((t) => getDateKey(t.startTime, 'month') === getDateKey(new Date().toISOString(), 'month'));
-  const yearlyTrips = completedTrips;
   const dailySessions = completedSessions.filter((m) => getDateKey(m.startTime, 'day') === getDateKey(new Date().toISOString(), 'day'));
   const monthlySessions = completedSessions.filter((m) => getDateKey(m.startTime, 'month') === getDateKey(new Date().toISOString(), 'month'));
 
@@ -169,6 +190,33 @@ export function DriverTripsScreen() {
   const [takingEndPhoto, setTakingEndPhoto] = useState(false);
   const startTripInProgressRef = useRef(false);
   const endTripInProgressRef = useRef(false);
+  const endTripActionLockRef = useRef(false);
+  /** When opening end-trip modal from the assigned trip card (no activeTrip), we resolve trip by driver+vehicle. */
+  const endingAssignedTripRef = useRef<typeof assignedTrips[0] | null>(null);
+  const [tripCaptureModal, setTripCaptureModal] = useState<{ kind: 'start' | 'end'; assignedTrip: typeof assignedTrips[0] } | null>(null);
+  /** Trip id we're completing (end photo in progress) – hides Complete button and prevents double attach. */
+  const [completingAssignedTripId, setCompletingAssignedTripId] = useState<string | null>(null);
+  const watchSubscriptionRef = useRef<{ remove: () => void } | null>(null);
+
+  /** Elapsed time in seconds (excluding pause segments) for an assigned trip that is running. */
+  const getAssignedTripElapsedSeconds = (a: typeof assignedTrips[0]): number => {
+    const started = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+    if (!started) return 0;
+    const now = Date.now();
+    const segments = a.pauseSegments ?? [];
+    let pauseMs = 0;
+    for (const seg of segments) {
+      const s = new Date(seg.startedAt).getTime();
+      const e = seg.endedAt ? new Date(seg.endedAt).getTime() : now;
+      if (e > s) pauseMs += e - s;
+    }
+    return Math.max(0, Math.floor((now - started - pauseMs) / 1000));
+  };
+  const formatElapsed = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  };
 
   const hasWorkRole = user?.role === 'driver_truck' || user?.role === 'driver_machine' || user?.role === 'assistant_supervisor';
 
@@ -283,9 +331,13 @@ export function DriverTripsScreen() {
         }
         const startTime = new Date().toISOString();
         const tripId = generateId('t');
+        const matchingAssigned = assignedTrips.find(
+          (a) => a.driverId === userId && a.vehicleId === selectedVehicleId && (a.status === 'TRIP_ASSIGNED' || a.status === 'TRIP_PENDING')
+        );
         // STEP 7: Create trips row with start_time, start_lat, start_lon, photo_uri, status = in_progress
         await addTrip({
           id: tripId,
+          assignedTripId: matchingAssigned?.id ?? null,
           vehicleId: selectedVehicleId,
           driverId: userId,
           siteId,
@@ -300,9 +352,6 @@ export function DriverTripsScreen() {
           createdAt: startTime,
         });
         // STEP 8: Update assigned_trips status → TRIP_STARTED, started_at
-        const matchingAssigned = assignedTrips.find(
-          (a) => a.driverId === userId && a.vehicleId === selectedVehicleId && (a.status === 'TRIP_ASSIGNED' || a.status === 'TRIP_PENDING')
-        );
         if (matchingAssigned) {
           try {
             await updateAssignedTripStatus(matchingAssigned.id, 'TRIP_STARTED');
@@ -395,7 +444,8 @@ export function DriverTripsScreen() {
     });
     if (result.canceled || !result.assets?.[0]?.uri) return null;
     const asset = result.assets[0];
-    const uri = asset.uri;
+    let uri = asset.uri;
+    uri = await ensureUriHasBytes(uri);
     const mimeType = (asset as { mimeType?: string }).mimeType;
     if (!isAllowedImageFormat(uri, mimeType)) {
       Alert.alert(t('alert_error'), t('work_photo_only_images'));
@@ -422,7 +472,8 @@ export function DriverTripsScreen() {
     });
     if (result.canceled || !result.assets?.[0]?.uri) return null;
     const asset = result.assets[0];
-    const uri = asset.uri;
+    let uri = asset.uri;
+    uri = await ensureUriHasBytes(uri);
     const mimeType = (asset as { mimeType?: string }).mimeType;
     if (!isAllowedImageFormat(uri, mimeType)) {
       Alert.alert(t('alert_error'), t('work_photo_only_images'));
@@ -446,15 +497,25 @@ export function DriverTripsScreen() {
     if (photo) setEndPhoto(photo);
   };
 
-  const handleEndTrip = async (photoUri?: string, endLat?: number, endLon?: number) => {
-    if (!activeTrip || endTripInProgressRef.current) return;
-    const vehicle = vehicles.find((v) => v.id === activeTrip.vehicleId);
+  const handleEndTrip = async (
+    photoUri?: string,
+    endLat?: number,
+    endLon?: number,
+    tripOverride?: { id: string; assignedTripId?: string | null; vehicleId: string; driverId: string; siteId: string; startLat?: number; startLon?: number; status: string }
+  ) => {
+    const trip = tripOverride ?? activeTrip;
+    if (!trip || endTripInProgressRef.current) return;
+    const vehicle = vehicles.find((v) => v.id === trip.vehicleId);
     if (!vehicle) return;
-    const inProgressStatuses = ['TRIP_IN_PROGRESS', 'TRIP_STARTED', 'TRIP_RESUMED'];
-    const matchingAssigned = assignedTrips.find(
-      (a) => a.driverId === userId && a.vehicleId === activeTrip.vehicleId && inProgressStatuses.includes(a.status)
-    );
-    if (!canEndTrip(activeTrip, matchingAssigned ?? null, userId)) {
+    const endableStatuses = ['TRIP_IN_PROGRESS', 'TRIP_STARTED', 'TRIP_RESUMED', 'TRIP_PAUSED'];
+    const matchingAssigned =
+      (trip.assignedTripId
+        ? assignedTrips.find((a) => a.id === trip.assignedTripId)
+        : null) ??
+      assignedTrips.find(
+        (a) => a.driverId === userId && a.vehicleId === trip.vehicleId && endableStatuses.includes(a.status)
+      );
+    if (!canEndTrip(trip, matchingAssigned ?? null, userId)) {
       Alert.alert(t('error_title_validation'), t('trip_end_failed'));
       return;
     }
@@ -466,8 +527,8 @@ export function DriverTripsScreen() {
       if (lat == null || lon == null) {
         const coords = await getCoordsForTripEnd({
           startCoords:
-            activeTrip.startLat != null && activeTrip.startLon != null
-              ? { lat: activeTrip.startLat, lon: activeTrip.startLon }
+            trip.startLat != null && trip.startLon != null
+              ? { lat: trip.startLat, lon: trip.startLon }
               : null,
           timeoutMs: 10_000,
         });
@@ -476,27 +537,33 @@ export function DriverTripsScreen() {
       }
       const endLatVal = lat!;
       const endLonVal = lon!;
-      const startLat = activeTrip.startLat ?? 0;
-      const startLon = activeTrip.startLon ?? 0;
-      let distanceKm = Math.round(haversineKm(startLat, startLon, endLatVal, endLonVal) * 100) / 100;
+      const startLatForDistance = trip.startLat ?? 0;
+      const startLonForDistance = trip.startLon ?? 0;
+      let distanceKm = Math.round(haversineKm(startLatForDistance, startLonForDistance, endLatVal, endLonVal) * 100) / 100;
       if (distanceKm <= 0) distanceKm = 0.01;
       const endTime = new Date().toISOString();
-      await updateTrip(activeTrip.id, {
+      // trips_completed_gps_check requires start_lat, start_lon, end_lat, end_lon, distance_km all NOT NULL when status=completed
+      const startLat = trip.startLat ?? endLatVal;
+      const startLon = trip.startLon ?? endLonVal;
+      await updateTrip(trip.id, {
+        startLat,
+        startLon,
         endTime,
         endLat: endLatVal,
         endLon: endLonVal,
         distanceKm,
         status: 'completed',
         photoUri,
-        currentLat: undefined,
-        currentLon: undefined,
+        currentLat: null,
+        currentLon: null,
         locationUpdatedAt: undefined,
       });
       if (matchingAssigned) {
         try {
           await updateAssignedTripStatus(matchingAssigned.id, 'TRIP_NEED_APPROVAL');
-        } catch {
-          // Trip is already completed; approval sync is best-effort
+        } catch (syncErr) {
+          if (__DEV__) console.warn('Assigned trip status sync failed:', syncErr);
+          showToast(t('trip_end_assigned_sync_failed'));
         }
       }
       await refetch(true);
@@ -510,32 +577,127 @@ export function DriverTripsScreen() {
     }
   };
 
-  const openEndTripModal = () => {
+  const openEndTripModal = (assignedTrip?: typeof assignedTrips[0]) => {
+    endingAssignedTripRef.current = assignedTrip ?? null;
     setEndPhoto(null);
     setEndTripModalVisible(true);
   };
 
   const endTripWithGpsPhoto = async () => {
-    if (!endPhoto || !activeTrip || endTripInProgressRef.current || endingInProgress) return;
-    const photoLocalUri = endPhoto.uri;
-    let lat = endPhoto.lat;
-    let lon = endPhoto.lon;
-    setEndTripModalVisible(false);
-    setEndPhoto(null);
-    setEndingInProgress(true);
+    const currentEndPhoto = endPhoto;
+    if (
+      !canSubmitTripEndAction({
+        hasEndPhoto: !!currentEndPhoto,
+        actionLocked: endTripActionLockRef.current,
+        endTripInProgress: endTripInProgressRef.current,
+        endingInProgress,
+      })
+    ) {
+      Alert.alert(t('alert_error'), t('trip_end_cannot_now'));
+      return;
+    }
+    if (!currentEndPhoto) {
+      Alert.alert(t('alert_error'), t('trip_end_cannot_now'));
+      return;
+    }
+    endTripActionLockRef.current = true;
     try {
+      const assignment = endingAssignedTripRef.current;
+      const resolvedTrip =
+        activeTrip ??
+        (assignment
+          ? trips.find(
+              (t) =>
+                t.assignedTripId === assignment.id &&
+                t.status === 'in_progress'
+            ) ??
+            trips.find(
+              (t) =>
+                t.driverId === userId &&
+                t.vehicleId === assignment.vehicleId &&
+                t.status === 'in_progress'
+            ) ?? null
+          : null);
+
+      let tripSnapshot: {
+        id: string;
+        assignedTripId?: string | null;
+        vehicleId: string;
+        driverId: string;
+        siteId: string;
+        startLat?: number;
+        startLon?: number;
+        status: 'in_progress';
+      };
+      let lat = currentEndPhoto.lat;
+      let lon = currentEndPhoto.lon;
+
+      if (resolvedTrip) {
+        tripSnapshot = {
+          id: resolvedTrip.id,
+          assignedTripId: resolvedTrip.assignedTripId ?? assignment?.id ?? null,
+          vehicleId: resolvedTrip.vehicleId,
+          driverId: resolvedTrip.driverId,
+          siteId: resolvedTrip.siteId,
+          startLat: resolvedTrip.startLat,
+          startLon: resolvedTrip.startLon,
+          status: 'in_progress' as const,
+        };
+      } else if (assignment) {
+        if (lat == null || lon == null) {
+          const coords = await getCoordsForTripEnd({ startCoords: null, timeoutMs: 10_000 });
+          lat = coords.lat;
+          lon = coords.lon;
+        }
+        const recoveryTripId = `t_${assignment.id.replace(/^at_/, '')}`;
+        const startTime = assignment.startedAt ?? new Date().toISOString();
+        await withLoading(() =>
+          addTrip({
+            id: recoveryTripId,
+            assignedTripId: assignment.id,
+            vehicleId: assignment.vehicleId,
+            driverId: userId,
+            siteId: assignment.siteId,
+            startTime,
+            startLat: lat!,
+            startLon: lon!,
+            status: 'in_progress',
+            distanceKm: 0,
+            createdAt: startTime,
+          })
+        );
+        tripSnapshot = {
+          id: recoveryTripId,
+          assignedTripId: assignment.id,
+          vehicleId: assignment.vehicleId,
+          driverId: userId,
+          siteId: assignment.siteId,
+          startLat: lat,
+          startLon: lon,
+          status: 'in_progress' as const,
+        };
+      } else {
+        endingAssignedTripRef.current = null;
+        Alert.alert(t('alert_error'), t('trip_end_no_trip_record'));
+        return;
+      }
+
+      const photoLocalUri = currentEndPhoto.uri;
       if (lat == null || lon == null) {
         const coords = await getCoordsForTripEnd({
           startCoords:
-            activeTrip.startLat != null && activeTrip.startLon != null
-              ? { lat: activeTrip.startLat, lon: activeTrip.startLon }
+            tripSnapshot.startLat != null && tripSnapshot.startLon != null
+              ? { lat: tripSnapshot.startLat, lon: tripSnapshot.startLon }
               : null,
           timeoutMs: 10_000,
         });
         lat = coords.lat;
         lon = coords.lon;
       }
-      const siteId = activeTrip.siteId;
+      setEndingInProgress(true);
+      setEndTripModalVisible(false);
+      setEndPhoto(null);
+      const siteId = tripSnapshot.siteId;
       let photoUrl: string | undefined;
       try {
         await withLoading(async () => {
@@ -564,7 +726,7 @@ export function DriverTripsScreen() {
             {
               text: t('trip_photo_upload_failed_end_anyway'),
               onPress: () => {
-                withLoading(() => handleEndTrip(undefined, lat!, lon!)).catch((e) => {
+                withLoading(() => handleEndTrip(undefined, lat!, lon!, tripSnapshot)).catch((e) => {
                   const { category, message } = categorizeError(e);
                   Alert.alert(t(ERROR_CATEGORY_TITLE_KEYS[category]), message || t('trip_end_failed'));
                 });
@@ -574,18 +736,21 @@ export function DriverTripsScreen() {
         );
         return;
       }
-      await withLoading(() => handleEndTrip(photoUrl, lat!, lon!));
+      await withLoading(() => handleEndTrip(photoUrl, lat!, lon!, tripSnapshot));
     } catch (e) {
       const { category, message } = categorizeError(e);
       const titleKey = ERROR_CATEGORY_TITLE_KEYS[category];
       Alert.alert(t(titleKey), message || t('trip_end_failed'));
     } finally {
       setEndingInProgress(false);
+      endingAssignedTripRef.current = null;
+      endTripActionLockRef.current = false;
     }
   };
 
   const endTripWithoutPhoto = async () => {
-    if (endTripInProgressRef.current || endingInProgress) return;
+    if (endTripActionLockRef.current || endTripInProgressRef.current || endingInProgress) return;
+    endTripActionLockRef.current = true;
     setEndTripModalVisible(false);
     setEndPhoto(null);
     setEndingInProgress(true);
@@ -597,6 +762,7 @@ export function DriverTripsScreen() {
       Alert.alert(t(titleKey), message || t('trip_end_failed'));
     } finally {
       setEndingInProgress(false);
+      endTripActionLockRef.current = false;
     }
   };
 
@@ -631,13 +797,20 @@ export function DriverTripsScreen() {
     setEndSessionModalVisible(false);
   };
 
-  const totalTrips = myTrips.filter((t) => t.status === 'completed').length;
-  const totalDistance = myTrips
-    .filter((t) => t.status === 'completed')
-    .reduce((s, t) => s + (t.distanceKm ?? 0), 0);
-  const totalTripFuel = myTrips
-    .filter((t) => t.status === 'completed')
-    .reduce((s, t) => s + (t.fuelConsumed ?? 0), 0);
+  /** Completed assigned trips for this driver (single source for trip history when using assigned flow). */
+  const completedAssignedTripsForDriver = !isSupervisorView && userId && isTruck
+    ? assignedTrips
+        .filter((a) => a.driverId === userId && a.vehicleType === 'truck' && a.status === 'TRIP_COMPLETED')
+        .sort((a, b) => (new Date(b.completedAt ?? 0).getTime()) - (new Date(a.completedAt ?? 0).getTime()))
+    : [];
+  const todayKey = getDateKey(new Date().toISOString(), 'day');
+  const monthKey = getDateKey(new Date().toISOString(), 'month');
+  const dailyCompletedAssigned = completedAssignedTripsForDriver.filter((a) => getDateKey((a.completedAt ?? a.endedAt ?? ''), 'day') === todayKey);
+  const monthlyCompletedAssigned = completedAssignedTripsForDriver.filter((a) => getDateKey((a.completedAt ?? a.endedAt ?? ''), 'month') === monthKey);
+
+  const totalTrips = completedAssignedTripsForDriver.length;
+  const totalDistance = completedAssignedTripsForDriver.reduce((s, a) => s + (a.distanceKm ?? 0), 0);
+  const totalTripFuel = completedAssignedTripsForDriver.reduce((s, a) => s + (a.fuelUsedL ?? 0), 0);
 
   const totalSessions = mySessions.filter((m) => m.status === 'completed').length;
   const totalHours = mySessions
@@ -647,12 +820,27 @@ export function DriverTripsScreen() {
     .filter((m) => m.status === 'completed')
     .reduce((s, m) => s + (m.fuelConsumed ?? 0), 0);
 
+  const truckActionableStatuses = ['TRIP_ASSIGNED', 'TRIP_PENDING', 'TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_IN_PROGRESS'];
+  const machineActionableStatuses = ['TASK_ASSIGNED', 'TASK_PENDING', 'TASK_STARTED', 'TASK_PAUSED', 'TASK_RESUMED', 'TASK_IN_PROGRESS'];
   const myAssignedTrips = !isSupervisorView && userId
-    ? assignedTrips.filter((a) => a.driverId === userId && a.vehicleType === 'truck')
+    ? assignedTrips.filter((a) => a.driverId === userId && a.vehicleType === 'truck' && truckActionableStatuses.includes(a.status))
     : [];
   const myAssignedTasks = !isSupervisorView && userId
-    ? assignedTrips.filter((a) => a.driverId === userId && a.vehicleType === 'machine')
+    ? assignedTrips.filter((a) => a.driverId === userId && a.vehicleType === 'machine' && machineActionableStatuses.includes(a.status))
     : [];
+  /** When there's an active trip, hide its assignment from the list so we only show the "Trip in progress" card (single place). */
+  const displayedAssignedTrips = activeTrip
+    ? myAssignedTrips.filter((a) => a.vehicleId !== activeTrip.vehicleId)
+    : myAssignedTrips;
+  const displayedAssignedTasks = activeSession
+    ? myAssignedTasks.filter((a) => a.vehicleId !== activeSession.vehicleId)
+    : myAssignedTasks;
+  /** Show standalone "Start trip" only when no active trip and no assignable/running assigned trip (single start entry point). */
+  const hasAssignableTrip = myAssignedTrips.some((a) => a.status === 'TRIP_ASSIGNED' || a.status === 'TRIP_PENDING');
+  const hasRunningAssignedTrip = myAssignedTrips.some((a) =>
+    ['TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_IN_PROGRESS'].includes(a.status)
+  );
+  const showStandaloneStart = !isSupervisorView && !activeTrip && !hasAssignableTrip && !hasRunningAssignedTrip;
 
   const activeVehicleId = activeTrip?.vehicleId ?? activeSession?.vehicleId;
   const activeVehicle = activeVehicleId ? vehicles.find((v) => v.id === activeVehicleId) : null;
@@ -762,19 +950,20 @@ export function DriverTripsScreen() {
           </>
         )}
 
-        {!isSupervisorView && (myAssignedTrips.length > 0 || myAssignedTasks.length > 0) && (
+        {!isSupervisorView && (displayedAssignedTrips.length > 0 || displayedAssignedTasks.length > 0) && (
           <View className="mb-4">
             <Text className="text-sm font-semibold text-gray-700 mb-2">
               {isTruck ? t('assigned_trips_my_trips') : t('assigned_tasks_my_tasks')}
             </Text>
-            {(isTruck ? myAssignedTrips : myAssignedTasks).map((a) => {
+            {(isTruck ? displayedAssignedTrips : displayedAssignedTasks).map((a) => {
               const nextStatus = getNextDriverStatus(a.status);
               const vehicleLabel = getVehicleLabel(a.vehicleId);
               const siteName = getSiteName(a.siteId);
               const canStart = a.status === 'TRIP_ASSIGNED' || a.status === 'TRIP_PENDING' || a.status === 'TASK_ASSIGNED' || a.status === 'TASK_PENDING';
               const canPause = a.status === 'TRIP_STARTED' || a.status === 'TRIP_IN_PROGRESS' || a.status === 'TRIP_RESUMED' || a.status === 'TASK_STARTED' || a.status === 'TASK_IN_PROGRESS' || a.status === 'TASK_RESUMED';
               const canResume = a.status === 'TRIP_PAUSED' || a.status === 'TASK_PAUSED';
-              const canComplete = a.status === 'TRIP_IN_PROGRESS' || a.status === 'TASK_IN_PROGRESS';
+              const canComplete = a.status === 'TRIP_STARTED' || a.status === 'TRIP_IN_PROGRESS' || a.status === 'TRIP_RESUMED' || a.status === 'TASK_STARTED' || a.status === 'TASK_IN_PROGRESS' || a.status === 'TASK_RESUMED';
+              const isRunning = canPause || canComplete;
               const isNeedApproval = a.status === 'TRIP_NEED_APPROVAL' || a.status === 'TASK_NEED_APPROVAL';
               return (
                 <Card key={a.id} className="mb-2 border-l-4 border-l-blue-400">
@@ -787,24 +976,37 @@ export function DriverTripsScreen() {
                       </View>
                     </View>
                   </View>
+                  {isRunning && (
+                    <Text className="text-sm text-slate-600 mb-2">{t('driver_elapsed')}: {formatElapsed(getAssignedTripElapsedSeconds(a))}</Text>
+                  )}
                   {!isNeedApproval && (canStart || canPause || canResume || canComplete) && nextStatus && (
                     <View className="flex-row flex-wrap gap-2">
                       {canStart && (
                         <TouchableOpacity
                           onPress={() => {
-                            setSelectedVehicleId(a.vehicleId);
-                            setStartPhoto(null);
-                            setStartModalVisible(true);
+                            if (isTruck) {
+                              setSelectedVehicleId(a.vehicleId);
+                              setStartPhoto(null);
+                              setStartModalVisible(true);
+                              return;
+                            }
+                            setTripCaptureModal({ kind: 'start', assignedTrip: a });
                           }}
                           className="bg-green-600 rounded-lg py-2 px-3 flex-row items-center"
                         >
                           <Play size={16} color="#fff" />
-                          <Text className="text-white font-semibold ml-2 text-sm">{t('driver_start_trip')}</Text>
+                          <Text className="text-white font-semibold ml-2 text-sm">{isTruck ? t('driver_start_trip') : t('driver_start_task')}</Text>
                         </TouchableOpacity>
                       )}
                       {canPause && (
                         <TouchableOpacity
-                          onPress={async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }}
+                          onPress={async () => {
+                            try {
+                              await updateAssignedTripStatus(a.id, nextStatus!);
+                            } catch (e) {
+                              Alert.alert(t('alert_error'), (e as Error).message);
+                            }
+                          }}
                           className="bg-amber-500 rounded-lg py-2 px-3 flex-row items-center"
                         >
                           <Pause size={16} color="#fff" />
@@ -813,20 +1015,29 @@ export function DriverTripsScreen() {
                       )}
                       {canResume && (
                         <TouchableOpacity
-                          onPress={async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }}
+                          onPress={async () => {
+                            try {
+                              await updateAssignedTripStatus(a.id, nextStatus!);
+                            } catch (e) {
+                              Alert.alert(t('alert_error'), (e as Error).message);
+                            }
+                          }}
                           className="bg-green-600 rounded-lg py-2 px-3 flex-row items-center"
                         >
                           <PlayCircle size={16} color="#fff" />
                           <Text className="text-white font-semibold ml-2 text-sm">{t('assigned_trip_resume')}</Text>
                         </TouchableOpacity>
                       )}
-                      {canComplete && (
+                      {canComplete && completingAssignedTripId !== a.id && (
                         <TouchableOpacity
-                          onPress={
-                            isTruck
-                              ? openEndTripModal
-                              : async () => { try { await updateAssignedTripStatus(a.id, nextStatus!); } catch (e) { Alert.alert(t('alert_error'), (e as Error).message); } }
-                          }
+                          onPress={() => {
+                            if (isTruck) {
+                              openEndTripModal(a);
+                              return;
+                            }
+                            setCompletingAssignedTripId(a.id);
+                            setTripCaptureModal({ kind: 'end', assignedTrip: a });
+                          }}
                           className="bg-blue-600 rounded-lg py-2 px-3 flex-row items-center"
                         >
                           <CheckCircle size={16} color="#fff" />
@@ -854,7 +1065,7 @@ export function DriverTripsScreen() {
                 </Text>
               </Card>
             )}
-            {!isSupervisorView && !activeTrip ? (
+            {showStandaloneStart ? (
               <TouchableOpacity
                 onPress={() => {
                   setSelectedVehicleId(myVehicles[0]?.id ?? '');
@@ -899,7 +1110,7 @@ export function DriverTripsScreen() {
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={openEndTripModal}
+                    onPress={() => openEndTripModal()}
                     disabled={endingInProgress}
                     className="flex-1 bg-amber-500 rounded-lg py-2 flex-row items-center justify-center"
                   >
@@ -950,39 +1161,37 @@ export function DriverTripsScreen() {
             </Card>
             <Card className="mb-3 bg-gray-50">
               <Text className="text-sm font-semibold text-gray-700 mb-2">{t('driver_daily_monthly_yearly')}</Text>
-              <View className="flex-row justify-between py-1"><Text className="text-sm text-gray-600">{t('driver_today')}</Text><Text className="text-sm font-medium">{dailyTrips.length} {t('driver_trips_count').toLowerCase()} · {dailyTrips.reduce((s, trip) => s + trip.distanceKm, 0)} {t('driver_km')}</Text></View>
-              <View className="flex-row justify-between py-1"><Text className="text-sm text-gray-600">{t('driver_this_month')}</Text><Text className="text-sm font-medium">{monthlyTrips.length} {t('driver_trips_count').toLowerCase()} · {monthlyTrips.reduce((s, trip) => s + trip.distanceKm, 0)} {t('driver_km')}</Text></View>
-              <View className="flex-row justify-between py-1"><Text className="text-sm text-gray-600">{t('driver_all_time')}</Text><Text className="text-sm font-medium">{yearlyTrips.length} {t('driver_trips_count').toLowerCase()} · {yearlyTrips.reduce((s, trip) => s + trip.distanceKm, 0)} {t('driver_km')}</Text></View>
+              <View className="flex-row justify-between py-1"><Text className="text-sm text-gray-600">{t('driver_today')}</Text><Text className="text-sm font-medium">{dailyCompletedAssigned.length} {t('driver_trips_count').toLowerCase()} · {dailyCompletedAssigned.reduce((s, a) => s + (a.distanceKm ?? 0), 0)} {t('driver_km')}</Text></View>
+              <View className="flex-row justify-between py-1"><Text className="text-sm text-gray-600">{t('driver_this_month')}</Text><Text className="text-sm font-medium">{monthlyCompletedAssigned.length} {t('driver_trips_count').toLowerCase()} · {monthlyCompletedAssigned.reduce((s, a) => s + (a.distanceKm ?? 0), 0)} {t('driver_km')}</Text></View>
+              <View className="flex-row justify-between py-1"><Text className="text-sm text-gray-600">{t('driver_all_time')}</Text><Text className="text-sm font-medium">{completedAssignedTripsForDriver.length} {t('driver_trips_count').toLowerCase()} · {completedAssignedTripsForDriver.reduce((s, a) => s + (a.distanceKm ?? 0), 0)} {t('driver_km')}</Text></View>
             </Card>
             <Text className="text-lg font-bold text-gray-900 mb-2">{t('driver_trip_history')}</Text>
-            {myTrips.length === 0 && <Text className="text-gray-500 py-2">{t('driver_no_trips_yet')}</Text>}
-            {myTrips.map((trip) => {
-              const matchingAssigned = trip.endTime && trip.status === 'completed'
-                ? assignedTrips.find(
-                    (a) => a.vehicleId === trip.vehicleId && a.driverId === trip.driverId && a.status === 'TRIP_COMPLETED' && a.completedAt
-                      && Math.abs(new Date(a.completedAt).getTime() - new Date(trip.endTime!).getTime()) < 10 * 60 * 1000
-                  )
-                : undefined;
-              const durationHours = trip.endTime
-                ? getEffectiveDurationHours(trip.startTime, trip.endTime, matchingAssigned?.pauseSegments)
-                : 0;
-              const kmPerHour = trip.status === 'completed' && durationHours > 0 ? trip.distanceKm / durationHours : 0;
-              return (
-                <Card key={trip.id} className="mb-2">
-                  <View className="flex-row justify-between">
-                    <View>
-                      <Text className="font-medium text-gray-900">{getVehicleLabel(trip.vehicleId)}</Text>
-                      <Text className="text-xs text-gray-500">{trip.startTime.slice(0, 16)} · {trip.status}</Text>
-                      {trip.status === 'completed' && durationHours > 0 && (
-                        <Text className="text-xs text-gray-500 mt-1">{t('driver_duration')}: {durationHours.toFixed(1)} h · {kmPerHour.toFixed(0)} km/h</Text>
-                      )}
+            {completedAssignedTripsForDriver.length === 0 && (
+              <Text className="text-gray-500 py-2">{t('driver_no_trips_yet')}</Text>
+            )}
+            {completedAssignedTripsForDriver.length > 0 &&
+              completedAssignedTripsForDriver.map((a) => {
+                const durationHours = a.startedAt && a.endedAt
+                  ? getEffectiveDurationHours(a.startedAt, a.endedAt, a.pauseSegments)
+                  : 0;
+                const kmPerHour = durationHours > 0 && (a.distanceKm ?? 0) > 0 ? (a.distanceKm ?? 0) / durationHours : 0;
+                return (
+                  <Card key={a.id} className="mb-2">
+                    <View className="flex-row justify-between">
+                      <View>
+                        <Text className="font-medium text-gray-900">{getVehicleLabel(a.vehicleId)}</Text>
+                        <Text className="text-xs text-gray-500">{(a.completedAt ?? a.endedAt ?? a.createdAt).slice(0, 16)} · {ASSIGNED_TRIP_STATUS_LABELS['TRIP_COMPLETED']}</Text>
+                        {durationHours > 0 && (
+                          <Text className="text-xs text-gray-500 mt-1">{t('driver_duration')}: {durationHours.toFixed(1)} h{kmPerHour > 0 ? ` · ${kmPerHour.toFixed(0)} km/h` : ''}</Text>
+                        )}
+                      </View>
+                      <Text className="font-semibold">{(a.distanceKm ?? 0).toFixed(1)} km · {(a.fuelUsedL ?? 0).toFixed(1)} L</Text>
                     </View>
-                    <Text className="font-semibold">{trip.distanceKm} km · {(trip.fuelConsumed ?? 0).toFixed(1)} L</Text>
-                  </View>
-                  {trip.photoUri ? <Text className="text-xs text-green-600 mt-1">{t('driver_photo_attached')}</Text> : null}
-                </Card>
-              );
-            })}
+                    {(a.startPhotoUrl || a.endPhotoUrl) ? <Text className="text-xs text-green-600 mt-1">{t('driver_photo_attached')}</Text> : null}
+                  </Card>
+                );
+              })
+            }
           </>
         ) : (
           <>
@@ -1115,7 +1324,7 @@ export function DriverTripsScreen() {
               </View>
               <Text className="text-lg font-bold text-gray-900 text-center">{t('trip_end_modal_title')}</Text>
             </View>
-            <Text className="text-sm text-gray-600 text-center mb-2">{isTruck ? t('trip_end_modal_message_required') : t('trip_end_modal_message')}</Text>
+            <Text className="text-sm text-gray-600 text-center mb-2">{isTruck ? t('trip_end_modal_message_required') : t('trip_end_modal_message_required_machine')}</Text>
             {isTruck && <Text className="text-xs text-amber-600 text-center mb-4">{t('trip_end_photo_speedometer_hint')}</Text>}
             {!endPhoto ? (
               <View className="gap-3">
@@ -1133,14 +1342,16 @@ export function DriverTripsScreen() {
                     </>
                   )}
                 </TouchableOpacity>
-                {!isTruck && (
-                  <TouchableOpacity onPress={endTripWithoutPhoto} className="py-3 rounded-lg bg-gray-200 items-center">
-                    <Text className="font-semibold text-gray-700">{t('trip_end_without_photo')}</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      endingAssignedTripRef.current = null;
+                      setEndTripModalVisible(false);
+                      setEndPhoto(null);
+                    }}
+                    className="py-2 items-center"
+                  >
+                    <Text className="text-sm text-gray-500">{t('common_cancel')}</Text>
                   </TouchableOpacity>
-                )}
-                <TouchableOpacity onPress={() => { setEndTripModalVisible(false); setEndPhoto(null); }} className="py-2 items-center">
-                  <Text className="text-sm text-gray-500">{t('common_cancel')}</Text>
-                </TouchableOpacity>
               </View>
             ) : (
               <View className="gap-3">
@@ -1154,11 +1365,24 @@ export function DriverTripsScreen() {
                   <TouchableOpacity onPress={() => setEndPhoto(null)} disabled={endingInProgress} className="flex-1 py-2 rounded-lg bg-gray-200 items-center">
                     <Text className="font-semibold text-gray-700">{t('trip_end_retake')}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={endTripWithGpsPhoto} disabled={endingInProgress} className="flex-1 py-2 rounded-lg bg-amber-500 items-center">
+                  <TouchableOpacity
+                    onPress={() => void endTripWithGpsPhoto()}
+                    disabled={endingInProgress}
+                    activeOpacity={0.8}
+                    className="flex-1 py-3 rounded-lg bg-amber-500 items-center justify-center min-h-[44px]"
+                  >
                     {endingInProgress ? <ActivityIndicator size="small" color="#fff" /> : <Text className="font-semibold text-white">{t('trip_end_use_photo')}</Text>}
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={() => { setEndTripModalVisible(false); setEndPhoto(null); }} disabled={endingInProgress} className="py-2 items-center">
+                <TouchableOpacity
+                  onPress={() => {
+                    endingAssignedTripRef.current = null;
+                    setEndTripModalVisible(false);
+                    setEndPhoto(null);
+                  }}
+                  disabled={endingInProgress}
+                  className="py-2 items-center"
+                >
                   <Text className="text-sm text-gray-500">{t('common_cancel')}</Text>
                 </TouchableOpacity>
               </View>
@@ -1310,6 +1534,54 @@ export function DriverTripsScreen() {
           </View>
         </View>
       </Modal>
+
+      {tripCaptureModal && (
+        <TripPhotoCaptureModal
+          visible={true}
+          assignedTripId={tripCaptureModal.assignedTrip.id}
+          kind={tripCaptureModal.kind}
+          vehicleType={tripCaptureModal.assignedTrip.vehicleType}
+          onResult={async (result) => {
+            const a = tripCaptureModal.assignedTrip;
+            const kind = tripCaptureModal.kind;
+            const tripId = a.id;
+            setTripCaptureModal(null);
+            try {
+              if (kind === 'start') {
+                const status = a.vehicleType === 'truck' ? 'TRIP_STARTED' : 'TASK_STARTED';
+                await updateAssignedTripStatus(tripId, status);
+                await updateAssignedTrip(tripId, {
+                  startPhotoUrl: result.photoUrl,
+                  startGpsLat: result.lat,
+                  startGpsLng: result.lng,
+                });
+              } else {
+                const now = new Date().toISOString();
+                const status = a.vehicleType === 'truck' ? 'TRIP_NEED_APPROVAL' : 'TASK_NEED_APPROVAL';
+                await updateAssignedTripStatus(tripId, status);
+                try {
+                  await updateAssignedTrip(tripId, {
+                    endedAt: now,
+                    endPhotoUrl: result.photoUrl,
+                    endGpsLat: result.lat,
+                    endGpsLng: result.lng,
+                  });
+                } catch (photoErr) {
+                  if (__DEV__) console.warn('Could not save end photo/GPS to assigned_trip:', photoErr);
+                }
+              }
+            } catch (e) {
+              Alert.alert(t('alert_error'), (e as Error).message);
+            } finally {
+              if (kind === 'end') setCompletingAssignedTripId(null);
+            }
+          }}
+          onCancel={() => {
+            setTripCaptureModal(null);
+            setCompletingAssignedTripId(null);
+          }}
+        />
+      )}
     </View>
   );
 }

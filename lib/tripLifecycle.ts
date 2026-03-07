@@ -8,7 +8,7 @@
  * - Assistant Supervisor: verify only (NEED_APPROVAL → COMPLETED).
  * - System: ASSIGNED → PENDING (after 1 day), RESUMED → IN_PROGRESS (after 2 min).
  *
- * No role may skip stages (e.g. ASSIGNED → COMPLETED or STARTED → COMPLETED).
+ * No role may skip assignment intent stages (e.g. ASSIGNED → COMPLETED).
  */
 
 /** Truck (trip) statuses */
@@ -76,8 +76,9 @@ function statusFromPhase(phase: Phase, prefix: 'TRIP' | 'TASK'): AssignedTripSta
 /** Allowed phase transitions per role. */
 const DRIVER_PHASE_TRANSITIONS: Partial<Record<Phase, Phase[]>> = {
   ASSIGNED: ['STARTED'],
-  STARTED: ['PAUSED'],
-  PAUSED: ['RESUMED'],
+  STARTED: ['PAUSED', 'NEED_APPROVAL'],
+  PAUSED: ['RESUMED', 'NEED_APPROVAL'],
+  RESUMED: ['PAUSED', 'NEED_APPROVAL'],
   IN_PROGRESS: ['NEED_APPROVAL'],
 };
 const ASSISTANT_SUPERVISOR_PHASE_TRANSITIONS: Partial<Record<Phase, Phase[]>> = {
@@ -194,8 +195,8 @@ export function getInitialStatusForVehicleType(vehicleType: 'truck' | 'machine')
 }
 
 /**
- * Next status for driver: ASSIGNED→STARTED, STARTED→PAUSED, PAUSED→RESUMED, IN_PROGRESS→NEED_APPROVAL.
- * Returns the same prefix (TRIP_ or TASK_) as current status.
+ * Next status for driver: ASSIGNED→STARTED, STARTED→PAUSED, PAUSED→RESUMED, RESUMED→PAUSED (or complete via UI), IN_PROGRESS→NEED_APPROVAL.
+ * Returns the same prefix (TRIP_ or TASK_) as current status. Used to show action buttons; from RESUMED we return PAUSED so Pause + Complete both show.
  */
 export function getNextDriverStatus(current: AssignedTripStatus): AssignedTripStatus | null {
   const phase = getPhase(current);
@@ -205,6 +206,7 @@ export function getNextDriverStatus(current: AssignedTripStatus): AssignedTripSt
     phase === 'ASSIGNED' ? 'STARTED'
     : phase === 'STARTED' ? 'PAUSED'
     : phase === 'PAUSED' ? 'RESUMED'
+    : phase === 'RESUMED' ? 'PAUSED'
     : phase === 'IN_PROGRESS' ? 'NEED_APPROVAL'
     : null;
   return next != null ? statusFromPhase(next, prefix as 'TRIP' | 'TASK') : null;

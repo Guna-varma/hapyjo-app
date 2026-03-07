@@ -28,6 +28,9 @@ export type VehicleType = 'truck' | 'machine';
 /** active = available for use; inactive = soft-deleted (no hard delete for head_sup/supervisor). Allocated is derived from driver_vehicle_assignments. */
 export type VehicleStatus = 'active' | 'inactive';
 
+/** Fuel model: km_per_l = truck (fuel_rate = km/L), l_per_hour = machine (fuel_rate = L/hr). */
+export type VehicleFuelMode = 'km_per_l' | 'l_per_hour';
+
 export interface Vehicle {
   id: string;
   /** Optional. Omitted = free vehicle (not assigned to any site). */
@@ -37,6 +40,10 @@ export interface Vehicle {
   mileageKmPerLitre?: number;
   /** Machine only: hours per litre (hr/L) — operating hours per litre of fuel. */
   hoursPerLitre?: number;
+  /** Trip fuel calculation: km_per_l (truck) or l_per_hour (machine). */
+  fuelMode?: VehicleFuelMode | null;
+  /** Truck: km per litre. Machine: litres per hour. */
+  fuelRate?: number | null;
   /** Truck only: load capacity in tons (for rental/customer info). */
   capacityTons?: number;
   tankCapacityLitre: number;
@@ -165,6 +172,7 @@ export interface Expense {
 
 export interface Trip {
   id: string;
+  assignedTripId?: string | null;
   vehicleId: string;
   driverId: string;
   siteId: string;
@@ -175,9 +183,9 @@ export interface Trip {
   endLat?: number;
   endLon?: number;
   /** Real-time: current driver position during in_progress trip */
-  currentLat?: number;
-  currentLon?: number;
-  locationUpdatedAt?: string;
+  currentLat?: number | null;
+  currentLon?: number | null;
+  locationUpdatedAt?: string | null;
   distanceKm: number;
   loadQuantity?: string;
   status: 'in_progress' | 'completed';
@@ -227,6 +235,22 @@ export interface AssignedTrip {
   pauseSegments?: { startedAt: string; endedAt: string }[];
   completedAt?: string | null;
   completedBy?: string | null;
+  /** Start: photo URL (compressed ~50KB), GPS, timestamp stored in startedAt */
+  startPhotoUrl?: string | null;
+  endPhotoUrl?: string | null;
+  startGpsLat?: number | null;
+  startGpsLng?: number | null;
+  endGpsLat?: number | null;
+  endGpsLng?: number | null;
+  /** Supervisor-entered: truck = odometer km, machine = hour meter */
+  startReading?: number | null;
+  endReading?: number | null;
+  /** Calculated after supervisor entry: truck distance km, machine hours */
+  distanceKm?: number | null;
+  hoursUsed?: number | null;
+  fuelUsedL?: number | null;
+  /** When driver ended trip (status = NEED_APPROVAL) */
+  endedAt?: string | null;
 }
 
 export interface Issue {

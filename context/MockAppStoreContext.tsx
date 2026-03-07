@@ -190,7 +190,27 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
     id: string,
     toStatus: AssignedTrip["status"]
   ) => Promise<void>;
-  updateAssignedTrip: (id: string, patch: Partial<Pick<AssignedTrip, "notes">>) => Promise<void>;
+  updateAssignedTrip: (
+    id: string,
+    patch: Partial<
+      Pick<
+        AssignedTrip,
+        | "notes"
+        | "startPhotoUrl"
+        | "endPhotoUrl"
+        | "startGpsLat"
+        | "startGpsLng"
+        | "endGpsLat"
+        | "endGpsLng"
+        | "startReading"
+        | "endReading"
+        | "distanceKm"
+        | "hoursUsed"
+        | "fuelUsedL"
+        | "endedAt"
+      >
+    >
+  ) => Promise<void>;
   updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
   updateSiteTask: (id: string, patch: Partial<SiteTask>) => Promise<void>;
   addReport: (report: Report) => Promise<void>;
@@ -205,6 +225,24 @@ export interface MockAppStoreContextValue extends MockAppStoreState {
 }
 
 const defaultContractRate = 500;
+
+function isMissingSchemaColumnError(
+  error: { code?: string; message?: string; details?: string },
+  column: string
+): boolean {
+  const needle = column.toLowerCase();
+  const combined = `${error.code ?? ""} ${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+  const hasColumnName =
+    combined.includes(`'${needle}'`) ||
+    combined.includes(`"${needle}"`) ||
+    combined.includes(` ${needle} `);
+  return (
+    combined.includes("schema cache") &&
+    hasColumnName &&
+    combined.includes("could not find")
+  ) || combined.includes(`column "${needle}" does not exist`) ||
+    combined.includes(`column ${needle} does not exist`);
+}
 
 const emptyState: MockAppStoreState = {
   sites: [],
@@ -288,6 +326,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
         reportsRes,
         profilesRes,
         budgetAllocationsRes,
+        assignedTripsRes,
       ] = await Promise.all([
         supabase.from("sites").select("*"),
         supabase.from("vehicles").select("*"),
@@ -320,6 +359,11 @@ function useSupabaseStore(): MockAppStoreContextValue {
           .from("site_budget_allocations")
           .select("*")
           .order("allocated_at", { ascending: true }),
+        supabase
+          .from("assigned_trips")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(150),
       ]);
 
       let budgetAllocations: BudgetAllocation[] = [];
@@ -330,6 +374,11 @@ function useSupabaseStore(): MockAppStoreContextValue {
       }
 
       let assignedTrips: AssignedTrip[] = [];
+      if (!assignedTripsRes.error && assignedTripsRes.data) {
+        assignedTrips = (assignedTripsRes.data as Record<string, unknown>[]).map((r) =>
+          assignedTripFromRow(r)
+        );
+      }
 
       const sites = (sitesRes.data ?? []).map((r) =>
         siteFromRow(r as Record<string, unknown>)
@@ -434,28 +483,6 @@ function useSupabaseStore(): MockAppStoreContextValue {
         reports,
         notifications,
       });
-
-      // Load assigned_trips in background (lightweight, non-blocking) so the app stays responsive
-      void supabase
-        .from("assigned_trips")
-        .select(
-          "id, site_id, vehicle_id, driver_id, vehicle_type, task_type, status, notes, created_by, created_at, started_at, paused_at, resumed_at, pause_segments, completed_at, completed_by"
-        )
-        .order("created_at", { ascending: false })
-        .limit(150)
-        .then(
-          (assignedTripsRes) => {
-            if (!assignedTripsRes.error && assignedTripsRes.data) {
-              const loaded = (
-                assignedTripsRes.data as Record<string, unknown>[]
-              ).map((r) => assignedTripFromRow(r));
-              setState((prev) => ({ ...prev, assignedTrips: loaded }));
-            }
-          },
-          () => {
-            /* table may not exist or RLS; keep assignedTrips as [] */
-          }
-        );
     } catch {
       // keep previous state on error
     } finally {
@@ -1033,17 +1060,43 @@ function useSupabaseStore(): MockAppStoreContextValue {
   const addTrip = useCallback(
     async (trip: Trip) => {
       const row = tripToRow(trip);
+      let existedForAssignment = false;
+      if (trip.assignedTripId) {
+        const { data: existingRows, error: existingErr } = await supabase
+          .from("trips")
+          .select("id")
+          .eq("assigned_trip_id", trip.assignedTripId)
+          .limit(1);
+        if (!existingErr && (existingRows?.length ?? 0) > 0) {
+          existedForAssignment = true;
+        }
+      }
       const result = await safeDbWrite(
         async () => {
-          const { error } = await supabase.from("trips").insert(row);
-          if (error) throw error;
+          if (trip.assignedTripId) {
+            const { error: upsertError } = await supabase
+              .from("trips")
+              .upsert(row, { onConflict: "assigned_trip_id" });
+            if (upsertError) {
+              const msg = upsertError.message ?? "";
+              if (/on conflict|unique|constraint/i.test(msg)) {
+                const { error: insertError } = await supabase.from("trips").insert(row);
+                if (insertError) throw insertError;
+              } else {
+                throw upsertError;
+              }
+            }
+          } else {
+            const { error } = await supabase.from("trips").insert(row);
+            if (error) throw error;
+          }
         },
         { retryOnceOnNetwork: true }
       );
       if (!result.ok) {
         throw new Error(getDbErrorMessage(result.error, result.error.message));
       }
-      if (trip.status === "in_progress") {
+      if (trip.status === "in_progress" && !existedForAssignment) {
         const siteName = state.sites.find((s) => s.id === trip.siteId)?.name;
         const vehicleNumberOrId = state.vehicles.find(
           (v) => v.id === trip.vehicleId
@@ -1090,6 +1143,13 @@ function useSupabaseStore(): MockAppStoreContextValue {
       if (!result.ok) {
         throw new Error(getDbErrorMessage(result.error, result.error.message));
       }
+      // Optimistic update so the trip disappears from "in progress" immediately (avoids reload/throttle issues)
+      setState((prev) => ({
+        ...prev,
+        trips: prev.trips.map((t) =>
+          t.id === id ? { ...t, ...patch } : t
+        ),
+      }));
       const trip = state.trips.find((t) => t.id === id);
       if (trip) {
         const siteName = state.sites.find((s) => s.id === trip.siteId)?.name;
@@ -1117,7 +1177,10 @@ function useSupabaseStore(): MockAppStoreContextValue {
             await supabase.from("notifications").insert(r);
         }
       }
-      await refetch();
+      // On completion the caller (handleEndTrip) does refetch(true); skip here to avoid double refetch and throttle
+      if (patch.status !== "completed") {
+        await refetch();
+      }
     },
     [refetch, state.trips, state.sites, state.vehicles, state.users]
   );
@@ -1567,6 +1630,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
       const now = new Date().toISOString();
       if (toStatus === "TRIP_STARTED" || toStatus === "TASK_STARTED")
         patch.startedAt = now;
+      // Store pause/resume times in DB for accurate duration calculations (effective duration = elapsed minus pause_segments).
       if (toStatus === "TRIP_PAUSED" || toStatus === "TASK_PAUSED") {
         patch.pausedAt = now;
         const prev = current.pauseSegments ?? [];
@@ -1588,7 +1652,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
         toStatus === "TRIP_NEED_APPROVAL" ||
         toStatus === "TASK_NEED_APPROVAL"
       ) {
-        // no extra fields
+        patch.endedAt = now;
       }
       if (toStatus === "TRIP_COMPLETED" || toStatus === "TASK_COMPLETED") {
         patch.completedAt = now;
@@ -1601,19 +1665,46 @@ function useSupabaseStore(): MockAppStoreContextValue {
       delete (row as Record<string, unknown>).driver_id;
       delete (row as Record<string, unknown>).created_by;
       delete (row as Record<string, unknown>).created_at;
-      const result = await safeDbWrite(
-        async () => {
-          const { error } = await supabase
-            .from("assigned_trips")
-            .update(row)
-            .eq("id", id);
-          if (error) throw error;
-        },
-        { retryOnceOnNetwork: true }
-      );
+      const writeAssignedTrip = async (payload: Record<string, unknown>) =>
+        safeDbWrite(
+          async () => {
+            const { error } = await supabase
+              .from("assigned_trips")
+              .update(payload)
+              .eq("id", id);
+            if (error) throw error;
+          },
+          { retryOnceOnNetwork: true }
+        );
+      let droppedEndedAt = false;
+      let result = await writeAssignedTrip(row);
+      if (
+        !result.ok &&
+        Object.prototype.hasOwnProperty.call(row, "ended_at") &&
+        isMissingSchemaColumnError(result.error, "ended_at")
+      ) {
+        const fallbackRow = { ...row };
+        delete (fallbackRow as Record<string, unknown>).ended_at;
+        result = await writeAssignedTrip(fallbackRow);
+        droppedEndedAt = result.ok;
+      }
       if (!result.ok) {
         throw new Error(getDbErrorMessage(result.error, result.error.message));
       }
+      const optimisticPatch = droppedEndedAt
+        ? (() => {
+            const p = { ...patch };
+            delete (p as Partial<AssignedTrip>).endedAt;
+            return p;
+          })()
+        : patch;
+      // Optimistic update so pause/resume UI updates immediately
+      setState((prev) => ({
+        ...prev,
+        assignedTrips: prev.assignedTrips.map((t) =>
+          t.id === id ? { ...t, ...optimisticPatch } : t
+        ),
+      }));
       if (
         toStatus === "TRIP_NEED_APPROVAL" ||
         toStatus === "TASK_NEED_APPROVAL"
@@ -1668,7 +1759,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
           for (const r of rows) await supabase.from("notifications").insert(r);
         }
       }
-      await refetch();
+      await refetch(true);
     },
     [
       authUser?.id,
@@ -1681,7 +1772,27 @@ function useSupabaseStore(): MockAppStoreContextValue {
   );
 
   const updateAssignedTrip = useCallback(
-    async (id: string, patch: Partial<Pick<AssignedTrip, "notes">>) => {
+    async (
+      id: string,
+      patch: Partial<
+        Pick<
+          AssignedTrip,
+          | "notes"
+          | "startPhotoUrl"
+          | "endPhotoUrl"
+          | "startGpsLat"
+          | "startGpsLng"
+          | "endGpsLat"
+          | "endGpsLng"
+          | "startReading"
+          | "endReading"
+          | "distanceKm"
+          | "hoursUsed"
+          | "fuelUsedL"
+          | "endedAt"
+        >
+      >
+    ) => {
       const row = assignedTripToRow(patch);
       delete (row as Record<string, unknown>).id;
       delete (row as Record<string, unknown>).site_id;
@@ -1697,11 +1808,50 @@ function useSupabaseStore(): MockAppStoreContextValue {
       delete (row as Record<string, unknown>).completed_at;
       delete (row as Record<string, unknown>).completed_by;
       if (Object.keys(row).length === 0) return;
-      const { error } = await supabase
-        .from("assigned_trips")
-        .update(row)
-        .eq("id", id);
-      if (error) throw error;
+      const writeAssignedTrip = async (payload: Record<string, unknown>) =>
+        safeDbWrite(
+          async () => {
+            const { error } = await supabase
+              .from("assigned_trips")
+              .update(payload)
+              .eq("id", id);
+            if (error) throw error;
+          },
+          { retryOnceOnNetwork: true }
+        );
+      let droppedEndedAt = false;
+      let result = await writeAssignedTrip(row);
+      if (
+        !result.ok &&
+        Object.prototype.hasOwnProperty.call(row, "ended_at") &&
+        isMissingSchemaColumnError(result.error, "ended_at")
+      ) {
+        const fallbackRow = { ...row };
+        delete (fallbackRow as Record<string, unknown>).ended_at;
+        if (Object.keys(fallbackRow).length > 0) {
+          result = await writeAssignedTrip(fallbackRow);
+          droppedEndedAt = result.ok;
+        } else {
+          droppedEndedAt = true;
+          result = { ok: true } as const;
+        }
+      }
+      if (!result.ok) {
+        throw new Error(getDbErrorMessage(result.error, result.error.message));
+      }
+      const optimisticPatch = droppedEndedAt
+        ? (() => {
+            const p = { ...patch };
+            delete (p as Partial<AssignedTrip>).endedAt;
+            return p;
+          })()
+        : patch;
+      setState((prev) => ({
+        ...prev,
+        assignedTrips: prev.assignedTrips.map((t) =>
+          t.id === id ? { ...t, ...optimisticPatch } : t
+        ),
+      }));
       await refetch();
     },
     [refetch]

@@ -82,6 +82,8 @@ export function vehicleFromRow(row: Record<string, unknown>): Vehicle {
     vehicleNumberOrId: String(row.vehicle_number_or_id),
     mileageKmPerLitre: row.mileage_km_per_litre != null ? Number(row.mileage_km_per_litre) : undefined,
     hoursPerLitre: row.hours_per_litre != null ? Number(row.hours_per_litre) : undefined,
+    fuelMode: row.fuel_mode != null ? (row.fuel_mode as Vehicle['fuelMode']) : undefined,
+    fuelRate: row.fuel_rate != null ? Number(row.fuel_rate) : undefined,
     capacityTons: row.capacity_tons != null ? Number(row.capacity_tons) : undefined,
     tankCapacityLitre: Number(row.tank_capacity_litre ?? 0),
     fuelBalanceLitre: Number(row.fuel_balance_litre ?? 0),
@@ -112,6 +114,7 @@ export function expenseFromRow(row: Record<string, unknown>): Expense {
 export function tripFromRow(row: Record<string, unknown>): Trip {
   return {
     id: String(row.id),
+    assignedTripId: row.assigned_trip_id != null ? String(row.assigned_trip_id) : null,
     vehicleId: String(row.vehicle_id),
     driverId: String(row.driver_id),
     siteId: String(row.site_id),
@@ -256,6 +259,18 @@ export function assignedTripFromRow(row: Record<string, unknown>): AssignedTrip 
     pauseSegments: parsePauseSegments(row.pause_segments),
     completedAt: row.completed_at != null ? String(row.completed_at) : null,
     completedBy: row.completed_by != null ? String(row.completed_by) : null,
+    startPhotoUrl: row.start_photo_url != null ? String(row.start_photo_url) : null,
+    endPhotoUrl: row.end_photo_url != null ? String(row.end_photo_url) : null,
+    startGpsLat: row.start_gps_lat != null ? Number(row.start_gps_lat) : null,
+    startGpsLng: row.start_gps_lng != null ? Number(row.start_gps_lng) : null,
+    endGpsLat: row.end_gps_lat != null ? Number(row.end_gps_lat) : null,
+    endGpsLng: row.end_gps_lng != null ? Number(row.end_gps_lng) : null,
+    startReading: row.start_reading != null ? Number(row.start_reading) : null,
+    endReading: row.end_reading != null ? Number(row.end_reading) : null,
+    distanceKm: row.distance_km != null ? Number(row.distance_km) : null,
+    hoursUsed: row.hours_used != null ? Number(row.hours_used) : null,
+    fuelUsedL: row.fuel_used_l != null ? Number(row.fuel_used_l) : null,
+    endedAt: row.ended_at != null ? String(row.ended_at) : null,
   };
 }
 
@@ -279,6 +294,18 @@ export function assignedTripToRow(a: Partial<AssignedTrip>): Record<string, unkn
   }
   if (a.completedAt !== undefined) row.completed_at = a.completedAt ?? null;
   if (a.completedBy !== undefined) row.completed_by = a.completedBy ?? null;
+  if (a.startPhotoUrl !== undefined) row.start_photo_url = a.startPhotoUrl ?? null;
+  if (a.endPhotoUrl !== undefined) row.end_photo_url = a.endPhotoUrl ?? null;
+  if (a.startGpsLat !== undefined) row.start_gps_lat = a.startGpsLat ?? null;
+  if (a.startGpsLng !== undefined) row.start_gps_lng = a.startGpsLng ?? null;
+  if (a.endGpsLat !== undefined) row.end_gps_lat = a.endGpsLat ?? null;
+  if (a.endGpsLng !== undefined) row.end_gps_lng = a.endGpsLng ?? null;
+  if (a.startReading !== undefined) row.start_reading = a.startReading ?? null;
+  if (a.endReading !== undefined) row.end_reading = a.endReading ?? null;
+  if (a.distanceKm !== undefined) row.distance_km = a.distanceKm ?? null;
+  if (a.hoursUsed !== undefined) row.hours_used = a.hoursUsed ?? null;
+  if (a.fuelUsedL !== undefined) row.fuel_used_l = a.fuelUsedL ?? null;
+  if (a.endedAt !== undefined) row.ended_at = a.endedAt ?? null;
   return row;
 }
 
@@ -420,6 +447,8 @@ export function vehicleToRow(v: Partial<Vehicle>): Record<string, unknown> {
   if (v.vehicleNumberOrId != null) row.vehicle_number_or_id = v.vehicleNumberOrId;
   if (v.mileageKmPerLitre !== undefined) row.mileage_km_per_litre = v.mileageKmPerLitre;
   if (v.hoursPerLitre !== undefined) row.hours_per_litre = v.hoursPerLitre;
+  if (v.fuelMode !== undefined) row.fuel_mode = v.fuelMode ?? null;
+  if (v.fuelRate !== undefined) row.fuel_rate = v.fuelRate ?? null;
   if (v.tankCapacityLitre !== undefined) row.tank_capacity_litre = Number(v.tankCapacityLitre);
   if (v.fuelBalanceLitre !== undefined) row.fuel_balance_litre = Number(v.fuelBalanceLitre);
   if (v.idealConsumptionRange !== undefined) row.ideal_consumption_range = v.idealConsumptionRange;
@@ -449,6 +478,7 @@ export function expenseToRow(e: Partial<Expense>): Record<string, unknown> {
 export function tripToRow(t: Partial<Trip>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (t.id != null) row.id = t.id;
+  if (t.assignedTripId !== undefined) row.assigned_trip_id = t.assignedTripId ?? null;
   if (t.vehicleId != null) row.vehicle_id = t.vehicleId;
   if (t.driverId != null) row.driver_id = t.driverId;
   if (t.siteId != null) row.site_id = t.siteId;
@@ -491,6 +521,7 @@ export function stripUndefinedAndId<T extends Record<string, unknown>>(
 
 /** Allowed columns for trips UPDATE (PostgREST can 400 on unknown or wrong-type columns). */
 const TRIPS_UPDATE_KEYS = new Set([
+  'assigned_trip_id',
   'end_time', 'start_lat', 'start_lon', 'end_lat', 'end_lon',
   'current_lat', 'current_lon', 'location_updated_at', 'distance_km',
   'load_quantity', 'status', 'fuel_filled_at_start', 'fuel_consumed', 'photo_uri',

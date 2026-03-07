@@ -14,7 +14,8 @@
     "build:apk:preview": "eas build --platform android --profile preview",
     "build:standalone": "eas build --platform android --profile standalone",
     "start:lan": "expo start",
-    "start:tunnel": "expo start --tunnel",
+    "start:tunnel": "expo start -c --tunnel",
+    "start:tunnel:retry": "expo start -c --tunnel --max-workers 1",
     "supabase": "supabase"
   },
   "jest": {

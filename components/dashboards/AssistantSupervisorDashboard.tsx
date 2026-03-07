@@ -19,6 +19,7 @@ import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { generateId } from '@/lib/id';
 import { getInitialStatusForVehicleType, getCompletedStatus, getEffectiveDurationHours, ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import { ProgressBar } from '@/components/ui/ProgressBar';
+import { AssignedTripApprovalModal } from '@/components/trips/AssignedTripApprovalModal';
 import { Linking } from 'react-native';
 
 function normalizeId(id: string) {
@@ -68,6 +69,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const [savingPhone, setSavingPhone] = useState(false);
   const [assignTripModalVisible, setAssignTripModalVisible] = useState(false);
   const [assignTaskModalVisible, setAssignTaskModalVisible] = useState(false);
+  const [tripApprovalModal, setTripApprovalModal] = useState<AssignedTrip | null>(null);
   const [assignVehicleId, setAssignVehicleId] = useState('');
   const [assignDriverId, setAssignDriverId] = useState('');
   const [assignTaskType, setAssignTaskType] = useState('');
@@ -861,6 +863,29 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
           </Pressable>
         </Pressable>
       </Modal>
+
+      {tripApprovalModal && (
+        <AssignedTripApprovalModal
+          visible={true}
+          trip={tripApprovalModal}
+          vehicle={vehicles.find((v) => v.id === tripApprovalModal.vehicleId) ?? null}
+          onApprove={async (payload) => {
+            const next = getCompletedStatus(tripApprovalModal.status);
+            if (!next) return;
+            await updateAssignedTripStatus(tripApprovalModal.id, next);
+            await updateAssignedTrip(tripApprovalModal.id, {
+              startReading: payload.startReading,
+              endReading: payload.endReading,
+              distanceKm: payload.distanceKm,
+              hoursUsed: payload.hoursUsed,
+              fuelUsedL: payload.fuelUsedL,
+            });
+            showToast(t('assigned_trip_confirmed'));
+            setTripApprovalModal(null);
+          }}
+          onClose={() => setTripApprovalModal(null)}
+        />
+      )}
 
     </View>
   );
