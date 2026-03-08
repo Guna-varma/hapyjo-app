@@ -28,6 +28,9 @@ export const modalStyles = StyleSheet.create({
     borderRadius: layout.cardRadius,
     padding: layout.cardPadding,
     maxWidth: '100%',
+    minHeight: 200,
+    maxHeight: '85%',
+    alignSelf: 'center',
   },
   footer: {
     flexDirection: 'row',

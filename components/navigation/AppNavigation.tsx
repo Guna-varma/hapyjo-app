@@ -84,11 +84,12 @@ export function AppNavigation() {
   const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
 
   const setActiveTab = useCallback((tab: TabId, params?: SurveyNavParams) => {
+    if (!tabIds.includes(tab)) return;
     if (tab === 'surveys' && params?.openNewSurvey) setOpenNewSurveyModalOnce(true);
     if (tab === 'surveys' && params?.openReviseSurveyId) setOpenReviseSurveyIdOnce(params.openReviseSurveyId);
     if (tab === 'surveys' && params?.filterByDate) setSurveyDateFilterOnce(params.filterByDate);
     setActiveTabState(tab);
-  }, []);
+  }, [tabIds]);
 
   const { registerSetActiveTab } = useNotificationNavigation() ?? {};
   useEffect(() => {

@@ -49,6 +49,8 @@ export function UnifiedModal({
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const maxHeight = height * 0.85;
+  const isCenter = variant === 'center';
+  const centerSheetHeight = Math.min(420, height * 0.7);
 
   const content = (
     <View style={styles.contentWrap}>
@@ -114,6 +116,7 @@ export function UnifiedModal({
           style={[
             variant === 'sheet' ? modalStyles.sheet : modalStyles.sheetCenter,
             variant === 'sheet' && { height: maxHeight },
+            isCenter && { height: centerSheetHeight },
           ]}
           onPress={(e) => e.stopPropagation()}
         >

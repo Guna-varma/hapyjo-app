@@ -8,7 +8,6 @@ import {
 } from 'expo-file-system/legacy';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
-import { Button } from '@/components/ui/Button';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { colors } from '@/theme/tokens';
@@ -323,7 +322,6 @@ export function ReportsScreen() {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const readOnly = user ? isReportsReadOnly(user.role) : false;
   const showSummary = user ? canSeeFinancialSummary(user.role) : false;
-  const isOwnerLayout = user?.role === 'owner';
   /** Same financial reports layout for Owner and Accountant: Financial Summary, site budgets, contract rates, expenses, Export/Share. */
   const isFinancialReportsLayout = user?.role === 'owner' || user?.role === 'accountant';
   const [selectedSiteForExpenseDetail, setSelectedSiteForExpenseDetail] = useState<typeof sites[0] | null>(null);
@@ -506,6 +504,7 @@ export function ReportsScreen() {
         };
       })
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- inDateRange uses fuelDateFrom/fuelDateTo which are in deps
   }, [expenses, vehicleIdsForFuelSet, vehicles, sites, fuelDateFrom, fuelDateTo]);
   const tripsForFuel = trips.filter((t) => t.status === 'completed' && inDateRange(t.startTime));
   const sessionsForFuel = machineSessions.filter((m) => m.status === 'completed' && inDateRange(m.startTime));
@@ -534,7 +533,6 @@ export function ReportsScreen() {
   const totalMaintenanceAll = filteredExpenses
     .filter((e) => e.expenseCategory === 'maintenance')
     .reduce((sum, e) => sum + (e.amountRwf ?? 0), 0);
-  const revenueAll = scopedFinancialSummary.totals.revenueRwf;
   const netProfitAll = scopedFinancialSummary.totals.profitRwf;
 
   // Live data for Operations tab (not from saved reports)

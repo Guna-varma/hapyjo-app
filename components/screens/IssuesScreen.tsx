@@ -121,7 +121,8 @@ export function IssuesScreen() {
     }
   };
 
-  const openStatusPicker = (issue: import('@/types').Issue) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- optional status picker entry point
+  const _openStatusPicker = (issue: import('@/types').Issue) => {
     if (!canUpdateStatus) return;
     Alert.alert(
       t('issues_update_status'),

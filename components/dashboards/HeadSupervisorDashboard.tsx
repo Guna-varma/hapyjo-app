@@ -8,7 +8,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import { colors, layout } from '@/theme/tokens';
-import { Building2, Banknote, MapPin, TrendingUp, FileText, ClipboardCheck, AlertCircle, Truck, BarChart3 } from 'lucide-react-native';
+import { Building2, Banknote, MapPin, TrendingUp, FileText, AlertCircle, Truck, BarChart3 } from 'lucide-react-native';
 import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';

@@ -22,7 +22,7 @@ export function DriverAllocationScreen({ onBack }: { onBack: () => void }) {
       user?.role === 'head_supervisor'
         ? []
         : sites.filter((s) => s.assistantSupervisorId === user?.id || user?.siteAccess?.includes(s.id)).map((s) => s.id),
-    [sites, user?.id, user?.role]
+    [sites, user?.id, user?.role, user?.siteAccess]
   );
 
   const [selectedSiteIndex, setSelectedSiteIndex] = useState(0);

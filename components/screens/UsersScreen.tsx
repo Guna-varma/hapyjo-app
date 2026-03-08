@@ -10,6 +10,7 @@ import {
   Keyboard,
   StyleSheet,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -34,9 +35,6 @@ import { canCreateUser, getRoleLabelKey, getAssignableRoles } from '@/lib/rbac';
 import type { UserRole, User } from '@/types';
 import {
   User as UserIcon,
-  Mail,
-  Phone,
-  MapPin,
   Plus,
   Copy,
   MessageCircle,
@@ -44,7 +42,15 @@ import {
   KeyRound,
 } from 'lucide-react-native';
 import { InfoButton } from '@/components/ui/InfoButton';
-import { colors, layout, radius, spacing } from '@/theme/tokens';
+import {
+  colors,
+  dimensions,
+  form,
+  layout,
+  radius,
+  spacing,
+  typography,
+} from '@/theme/tokens';
 
 const DOMAIN = 'hapyjo.com';
 
@@ -105,8 +111,15 @@ export function UsersScreen() {
   const [credentialsModal, setCredentialsModal] = useState<{
     email: string;
     password: string;
+    role?: UserRole;
+  } | null>(null);
+  const [resetConfirmUser, setResetConfirmUser] = useState<{
+    id: string;
+    email: string;
+    role: UserRole;
   } | null>(null);
   const [resettingUserId, setResettingUserId] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [updateModalUser, setUpdateModalUser] = useState<User | null>(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -314,6 +327,7 @@ export function UsersScreen() {
       setCredentialsModal({
         email: result.email,
         password: result.temporary_password,
+        role: newRole,
       });
     } catch (e) {
       Alert.alert(
@@ -325,7 +339,7 @@ export function UsersScreen() {
     }
   };
 
-  const handleResetPassword = async (u: { id: string; email: string }) => {
+  const openResetConfirm = (u: { id: string; email: string; role: UserRole }) => {
     if (u.id === currentUser?.id) {
       Alert.alert(
         t('alert_not_allowed'),
@@ -333,45 +347,51 @@ export function UsersScreen() {
       );
       return;
     }
-    Alert.alert(
-      t('users_reset_password'),
-      `${u.email}? ${t('users_reset_password_confirm')}`,
-      [
-        { text: t('common_cancel'), style: 'cancel' },
-        {
-          text: t('users_reset'),
-          onPress: async () => {
-            setResettingUserId(u.id);
-            try {
-              const result = await resetUserPassword(u.id);
-              setCredentialsModal({
-                email: result.email ?? u.email,
-                password: result.temporary_password,
-              });
-            } catch (e) {
-              Alert.alert(
-                t('alert_error'),
-                e instanceof Error ? e.message : t('users_reset_failed')
-              );
-            } finally {
-              setResettingUserId(null);
-            }
-          },
-        },
-      ]
-    );
+    setResetError(null);
+    setResetConfirmUser({ id: u.id, email: u.email, role: u.role });
+  };
+
+  const closeResetConfirm = () => {
+    setResetConfirmUser(null);
+    setResetError(null);
+  };
+
+  const handleResetPasswordConfirm = async () => {
+    if (!resetConfirmUser) return;
+    const u = resetConfirmUser;
+    setResettingUserId(u.id);
+    setResetError(null);
+    try {
+      const result = await resetUserPassword(u.id);
+      closeResetConfirm();
+      setCredentialsModal({
+        email: result.email ?? u.email,
+        password: result.temporary_password ?? '',
+        role: u.role,
+      });
+    } catch (e) {
+      setResetError(e instanceof Error ? e.message : t('users_reset_failed'));
+    } finally {
+      setResettingUserId(null);
+    }
   };
 
   const handleCopyCredentials = async () => {
     if (!credentialsModal) return;
-    const text = `Your HapyJo login:\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}\n\n${t('users_share_login_body')}`;
+    const roleLine = credentialsModal.role
+      ? `\nRole: ${t(getRoleLabelKey(credentialsModal.role))}`
+      : '';
+    const text = `Your HapyJo login:\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}${roleLine}\n\n${t('users_share_login_body')}`;
     await Clipboard.setStringAsync(text);
     Alert.alert(t('alert_copied'), t('users_copied'));
   };
 
   const handleShareWhatsApp = async () => {
     if (!credentialsModal) return;
-    const text = `Your HapyJo login:\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}\n\n${t('users_share_login_body')}`;
+    const roleLine = credentialsModal.role
+      ? `\nRole: ${t(getRoleLabelKey(credentialsModal.role))}`
+      : '';
+    const text = `Your HapyJo login:\nEmail: ${credentialsModal.email}\nPassword: ${credentialsModal.password}${roleLine}\n\n${t('users_share_login_body')}`;
     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(text)}`;
     const webUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
 
@@ -537,7 +557,7 @@ export function UsersScreen() {
                           </Text>
                         </Pressable>
                         <Pressable
-                          onPress={() => handleResetPassword(u)}
+                          onPress={() => openResetConfirm(u)}
                           disabled={resettingUserId === u.id}
                           style={styles.resetBtn}
                         >
@@ -619,6 +639,65 @@ export function UsersScreen() {
         />
       </FormModal>
 
+      {/* Reset password confirmation: in-app modal so it always opens in production */}
+      <UnifiedModal
+        visible={!!resetConfirmUser}
+        onClose={closeResetConfirm}
+        title={t('users_reset_password')}
+        variant="center"
+        showCloseButton={true}
+        keyboardAvoiding={false}
+        footer={null}
+      >
+        {resetConfirmUser && (
+          <View style={styles.confirmBody}>
+            <Text style={styles.confirmMessage}>
+              {t('users_reset_password_confirm')}
+            </Text>
+            <Text style={modalStyles.label}>{t('users_email_label')}</Text>
+            <View style={styles.confirmEmailBox}>
+              <Text style={styles.confirmEmailText} numberOfLines={1}>
+                {resetConfirmUser.email}
+              </Text>
+            </View>
+            <Text style={[modalStyles.label, styles.confirmRoleLabel]}>
+              {t('users_role')}
+            </Text>
+            <View style={styles.confirmEmailBox}>
+              <Text style={styles.confirmEmailText}>
+                {t(getRoleLabelKey(resetConfirmUser.role))}
+              </Text>
+            </View>
+            {resetError != null && (
+              <Text style={styles.resetErrorText}>{resetError}</Text>
+            )}
+            <View style={styles.confirmActions}>
+              <Pressable
+                onPress={closeResetConfirm}
+                style={[modalStyles.btn, modalStyles.btnSecondary]}
+              >
+                <Text style={modalStyles.btnTextSecondary}>
+                  {t('common_cancel')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleResetPasswordConfirm}
+                disabled={resettingUserId === resetConfirmUser.id}
+                style={[modalStyles.btn, styles.confirmResetBtn]}
+              >
+                {resettingUserId === resetConfirmUser.id ? (
+                  <ActivityIndicator size="small" color={colors.surface} />
+                ) : (
+                  <Text style={styles.confirmResetBtnText}>
+                    {t('users_reset')}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </UnifiedModal>
+
       <UnifiedModal
         visible={!!credentialsModal}
         onClose={() => setCredentialsModal(null)}
@@ -628,48 +707,71 @@ export function UsersScreen() {
         keyboardAvoiding={false}
         footer={null}
       >
-        <Text style={styles.credentialsHint}>{t('users_share_login_hint')}</Text>
-        {credentialsModal && (
-          <>
-            <View style={styles.credBox}>
-              <Text style={styles.credLabel}>{t('users_email_label')}</Text>
-              <Text style={styles.credValue} selectable>
-                {credentialsModal.email}
+        <View style={styles.credentialsBody}>
+          <Text style={[modalStyles.label, styles.credentialsHint]}>
+            {t('users_share_login_hint')}
+          </Text>
+          {credentialsModal ? (
+            <>
+              <Text style={modalStyles.label}>{t('users_email_label')}</Text>
+              <View style={styles.credBox}>
+                <Text style={styles.credValue} selectable>
+                  {credentialsModal.email}
+                </Text>
+              </View>
+              <Text style={[modalStyles.label, styles.credLabelSpacing]}>
+                {t('users_password_label')}
               </Text>
-            </View>
-            <View style={styles.credBox}>
-              <Text style={styles.credLabel}>{t('users_password_label')}</Text>
-              <Text style={styles.credValue} selectable>
-                {credentialsModal.password}
+              <View style={styles.credBox}>
+                <Text style={styles.credValue} selectable>
+                  {credentialsModal.password}
+                </Text>
+              </View>
+              {credentialsModal.role != null && (
+                <>
+                  <Text style={[modalStyles.label, styles.credLabelSpacing]}>
+                    {t('users_role')}
+                  </Text>
+                  <View style={styles.credBox}>
+                    <Text style={styles.credValue}>
+                      {t(getRoleLabelKey(credentialsModal.role))}
+                    </Text>
+                  </View>
+                </>
+              )}
+              <View style={styles.credActions}>
+                <Pressable
+                  onPress={handleCopyCredentials}
+                  style={styles.copyBtn}
+                >
+                  <Copy size={dimensions.iconSize} color={colors.gray700} />
+                  <Text style={styles.copyBtnText}>{t('users_copy')}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleShareWhatsApp}
+                  style={styles.whatsappBtn}
+                >
+                  <MessageCircle
+                    size={dimensions.iconSize}
+                    color={colors.surface}
+                  />
+                  <Text style={styles.whatsappBtnText}>
+                    {t('users_whatsapp')}
+                  </Text>
+                </Pressable>
+              </View>
+              <Text style={styles.changePasswordHint}>
+                {t('users_change_password_after_hint')}
               </Text>
-            </View>
-            <View style={styles.credActions}>
               <Pressable
-                onPress={handleCopyCredentials}
-                style={styles.copyBtn}
+                onPress={() => setCredentialsModal(null)}
+                style={styles.doneBtn}
               >
-                <Copy size={20} color={colors.gray700} />
-                <Text style={styles.copyBtnText}>{t('users_copy')}</Text>
+                <Text style={styles.doneBtnText}>{t('users_done')}</Text>
               </Pressable>
-              <Pressable
-                onPress={handleShareWhatsApp}
-                style={styles.whatsappBtn}
-              >
-                <MessageCircle size={20} color={colors.surface} />
-                <Text style={styles.whatsappBtnText}>{t('users_whatsapp')}</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.changePasswordHint}>
-              {t('users_change_password_after_hint')}
-            </Text>
-            <Pressable
-              onPress={() => setCredentialsModal(null)}
-              style={styles.doneBtn}
-            >
-              <Text style={styles.doneBtnText}>{t('users_done')}</Text>
-            </Pressable>
-          </>
-        )}
+            </>
+          ) : null}
+        </View>
       </UnifiedModal>
 
       <FormModal
@@ -827,77 +929,127 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   chipMargin: { height: spacing.sm },
-  credentialsHint: {
-    fontSize: 14,
+  confirmBody: {
+    paddingTop: spacing.xs,
+  },
+  confirmMessage: {
+    fontSize: typography.body.fontSize,
     color: colors.textSecondary,
+    lineHeight: 22,
+    marginBottom: spacing.lg,
+  },
+  confirmEmailBox: {
+    backgroundColor: colors.gray100,
+    borderRadius: form.inputRadius,
+    padding: form.inputPadding,
+    marginBottom: spacing.md,
+  },
+  confirmRoleLabel: {
+    marginTop: spacing.sm,
+  },
+  confirmEmailText: {
+    fontSize: form.inputFontSize,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  resetErrorText: {
+    fontSize: form.labelFontSize,
+    color: colors.error,
+    marginBottom: spacing.md,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  confirmResetBtn: {
+    minWidth: 100,
+    backgroundColor: colors.primary,
+    minHeight: form.buttonHeight,
+  },
+  confirmResetBtnText: {
+    color: colors.surface,
+    fontWeight: '600',
+    fontSize: typography.body.fontSize,
+  },
+  credentialsBody: {
+    paddingTop: spacing.xs,
+  },
+  credentialsHint: {
     marginBottom: spacing.md,
   },
   credBox: {
-    backgroundColor: colors.gray50,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    backgroundColor: colors.gray100,
+    borderRadius: form.inputRadius,
+    padding: form.inputPadding,
+    marginBottom: spacing.md,
   },
-  credLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginBottom: spacing.xs,
+  credLabelSpacing: {
+    marginTop: spacing.sm,
   },
   credValue: {
-    fontSize: 16,
+    fontSize: form.inputFontSize,
     fontWeight: '600',
     color: colors.text,
   },
   credActions: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.sm,
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   copyBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
+    gap: spacing.sm,
+    borderRadius: form.inputRadius,
     backgroundColor: colors.gray200,
-    minHeight: 48,
+    minHeight: form.buttonHeight,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   copyBtnText: {
     fontWeight: '600',
+    fontSize: typography.body.fontSize,
     color: colors.gray700,
-    marginLeft: spacing.sm,
   },
   whatsappBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
+    gap: spacing.sm,
+    borderRadius: form.inputRadius,
     backgroundColor: colors.primary,
-    minHeight: 48,
+    minHeight: form.buttonHeight,
   },
   whatsappBtnText: {
     fontWeight: '600',
+    fontSize: typography.body.fontSize,
     color: colors.surface,
-    marginLeft: spacing.sm,
   },
   changePasswordHint: {
-    fontSize: 12,
+    fontSize: typography.caption.fontSize,
     color: colors.textMuted,
     textAlign: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   doneBtn: {
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
+    borderRadius: form.inputRadius,
     backgroundColor: colors.primary,
     alignItems: 'center',
-    minHeight: 48,
+    justifyContent: 'center',
+    minHeight: form.buttonHeight,
   },
   doneBtnText: {
     fontWeight: '600',
+    fontSize: typography.body.fontSize,
     color: colors.surface,
   },
 });

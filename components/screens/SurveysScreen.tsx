@@ -101,6 +101,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
       }
     }
     return Array.from(bySite.values()).map((x) => ({ ...x, siteName: getSiteName(x.siteId) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- getSiteName is stable (sites from store)
   }, [isSurveyor, filteredMySurveys, filteredApprovedSurveys, sites]);
 
   useEffect(() => {

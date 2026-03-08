@@ -2,7 +2,6 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable, Linking, ScrollView } from 'react-native';
 import * as Location from 'expo-location';
 import { Card } from '@/components/ui/Card';
-import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailScreen } from '@/components/tasks/TaskDetailScreen';
 import { Header } from '@/components/ui/Header';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -65,7 +64,6 @@ export function DriverDashboard(_props: DashboardNavProps = {}) {
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tasks used only to skip when driver has active trip
   }, [userId, user?.role, updateUser]);
-  const myTasks = tasks.filter((task) => task.assignedTo.includes(user?.id || ''));
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const listForSection = isTruck ? myAssignedTrips : myAssignedTasks;

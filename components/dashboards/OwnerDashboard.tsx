@@ -9,7 +9,8 @@ import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { formatAmount } from '@/lib/currency';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
 import { useLocale } from '@/context/LocaleContext';
-import { TrendingUp, Banknote, PieChart, Plus, FileText, Building2, Users, Globe, BarChart3, Truck } from 'lucide-react-native';
+import { canAccessTab } from '@/lib/rbac';
+import { TrendingUp, Banknote, PieChart, Plus, FileText, Building2, Users, Globe, BarChart3, Truck, ClipboardCheck } from 'lucide-react-native';
 import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
 import { colors, layout, form, radius } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
@@ -19,7 +20,7 @@ import { buildFinancialSummary } from '@/lib/financeSummary';
 export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const { t, locale, setLocale } = useLocale();
   const { user } = useAuth();
-  const { sites, surveys, expenses, trips, machineSessions, assignedTrips, vehicles, users, updateSite } = useMockAppStore();
+  const { sites, surveys, expenses, trips, machineSessions, assignedTrips, updateSite } = useMockAppStore();
   const ownerName = user?.name?.trim() || 'Owner';
   const [rateModalVisible, setRateModalVisible] = useState(false);
   const [rateSiteId, setRateSiteId] = useState<string | null>(null);
@@ -162,23 +163,34 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
         }
       />
       <DashboardLayout>
-        {/* Quick actions */}
-        {onNavigateTab && (
+        {/* Quick actions – only navigate to tabs this role can access (Owner has no Sites tab) */}
+        {onNavigateTab && user && (
           <Card style={[ownerStyles.quickCard, ownerStyles.cardSoft]}>
             <Text style={ownerStyles.quickTitle}>{t('dashboard_quick_actions')}</Text>
             <View style={ownerStyles.quickRow}>
-              <TouchableOpacity onPress={() => onNavigateTab('reports')} style={[ownerStyles.quickBtn, { backgroundColor: '#dbeafe' }]}>
-                <FileText size={18} color="#2563eb" />
-                <Text style={ownerStyles.quickBtnTextBlue}>{t('dashboard_generate_report')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => onNavigateTab('sites')} style={[ownerStyles.quickBtn, { backgroundColor: '#d1fae5' }]}>
-                <Building2 size={18} color="#059669" />
-                <Text style={ownerStyles.quickBtnTextGreen}>{t('dashboard_all_sites')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => onNavigateTab('users')} style={[ownerStyles.quickBtn, { backgroundColor: '#ede9fe' }]}>
-                <Users size={18} color="#7c3aed" />
-                <Text style={ownerStyles.quickBtnTextPurple}>{t('dashboard_user_management')}</Text>
-              </TouchableOpacity>
+              {canAccessTab(user.role, 'reports') && (
+                <TouchableOpacity onPress={() => onNavigateTab('reports')} style={[ownerStyles.quickBtn, { backgroundColor: '#dbeafe' }]}>
+                  <FileText size={18} color="#2563eb" />
+                  <Text style={ownerStyles.quickBtnTextBlue}>{t('dashboard_generate_report')}</Text>
+                </TouchableOpacity>
+              )}
+              {canAccessTab(user.role, 'sites') ? (
+                <TouchableOpacity onPress={() => onNavigateTab('sites')} style={[ownerStyles.quickBtn, { backgroundColor: '#d1fae5' }]}>
+                  <Building2 size={18} color="#059669" />
+                  <Text style={ownerStyles.quickBtnTextGreen}>{t('dashboard_all_sites')}</Text>
+                </TouchableOpacity>
+              ) : canAccessTab(user.role, 'surveys') ? (
+                <TouchableOpacity onPress={() => onNavigateTab('surveys')} style={[ownerStyles.quickBtn, { backgroundColor: '#d1fae5' }]}>
+                  <ClipboardCheck size={18} color="#059669" />
+                  <Text style={ownerStyles.quickBtnTextGreen}>{t('tab_surveys')}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {canAccessTab(user.role, 'users') && (
+                <TouchableOpacity onPress={() => onNavigateTab('users')} style={[ownerStyles.quickBtn, { backgroundColor: '#ede9fe' }]}>
+                  <Users size={18} color="#7c3aed" />
+                  <Text style={ownerStyles.quickBtnTextPurple}>{t('dashboard_user_management')}</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity onPress={() => setLanguageModalVisible(true)} style={[ownerStyles.quickBtn, { backgroundColor: '#fef3c7' }]}>
                 <Globe size={18} color="#b45309" />
                 <Text style={ownerStyles.quickBtnTextAmber}>{t('dashboard_language')}</Text>

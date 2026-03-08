@@ -46,7 +46,7 @@ export function WorkProgressGalleryScreen({
   const siteOptions = useMemo(() => {
     const list = allowedSiteIds.length > 0 ? sites.filter((s) => allowedSiteIds.includes(s.id)) : sites;
     return [
-      { value: ALL_SITES_VALUE as const, label: t('work_photo_filter_all_sites') },
+      { value: ALL_SITES_VALUE, label: t('work_photo_filter_all_sites') },
       ...list.map((s) => ({ value: s.id, label: s.name })),
     ];
   }, [sites, allowedSiteIds, t]);

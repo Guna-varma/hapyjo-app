@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, TextInput, Alert, useWindowDimensions, ScrollView, Platform, Linking, Image } from 'react-native';
 import { Card } from '@/components/ui/Card';
-import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailScreen } from '@/components/tasks/TaskDetailScreen';
 import { Header } from '@/components/ui/Header';
 import { DashboardLayout } from '@/components/ui/DashboardLayout';
@@ -57,6 +56,18 @@ const TABLET_BREAKPOINT = 600;
 const MIN_ASSIGN_FUEL_L = 1;
 const LOW_FUEL_WARNING_L = 10;
 
+const TEMPLATE_ORDER = [
+  'Pre-cut survey',
+  'Land clearing',
+  'Excavation',
+  'Rock breaking',
+  'Soil transport',
+  'Leveling',
+  'Compaction',
+  'After-cut survey',
+  'Final finishing',
+];
+
 export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProps = {}) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BREAKPOINT;
@@ -85,9 +96,12 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
   const [detailSubmitting, setDetailSubmitting] = useState(false);
   const [tripPhotoPreview, setTripPhotoPreview] = useState<{ uri: string; label: string } | null>(null);
 
-  const siteIds = user?.siteAccess ?? [];
+  const siteIds = useMemo(() => user?.siteAccess ?? [], [user?.siteAccess]);
   const assignedSite = sites.find((s) => siteIds.includes(s.id) || s.assistantSupervisorId === user?.id) ?? sites[0] ?? null;
-  const mySiteIds = assignedSite ? [assignedSite.id] : siteIds.length > 0 ? siteIds : sites.map((s) => s.id);
+  const mySiteIds = useMemo(
+    () => (assignedSite ? [assignedSite.id] : siteIds.length > 0 ? siteIds : sites.map((s) => s.id)),
+    [assignedSite, siteIds, sites]
+  );
   const dailyProductionData = useMemo(() => {
     const approved = surveys.filter((s) => s.status === 'approved' && mySiteIds.includes(s.siteId));
     const byDate = new Map<string, number>();
@@ -99,17 +113,6 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
       .map(([date, volumeM3]) => ({ date, volumeM3 }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [surveys, mySiteIds]);
-  const TEMPLATE_ORDER = [
-    'Pre-cut survey',
-    'Land clearing',
-    'Excavation',
-    'Rock breaking',
-    'Soil transport',
-    'Leveling',
-    'Compaction',
-    'After-cut survey',
-    'Final finishing',
-  ];
 
   const siteTasks = useMemo(() => {
     if (!assignedSite) return [];

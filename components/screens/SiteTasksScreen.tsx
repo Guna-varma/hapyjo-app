@@ -14,6 +14,18 @@ import { useResponsiveTheme } from '@/theme/responsive';
 import { colors, radius, spacing } from '@/theme/tokens';
 import type { SiteTask, SiteTaskStatus } from '@/types';
 
+const TEMPLATE_ORDER = [
+  'Pre-cut survey',
+  'Land clearing',
+  'Excavation',
+  'Rock breaking',
+  'Soil transport',
+  'Leveling',
+  'Compaction',
+  'After-cut survey',
+  'Final finishing',
+];
+
 function clampInt(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
@@ -69,18 +81,6 @@ export function SiteTasksScreen({ initialSiteId, readOnly, onBack }: SiteTasksSc
 
   const [selectedSiteId, setSelectedSiteId] = useState<string>(initialSiteId ?? allowedSiteIds[0] ?? '');
   const selectedSite = sites.find((s) => s.id === selectedSiteId) ?? null;
-
-  const TEMPLATE_ORDER = [
-    'Pre-cut survey',
-    'Land clearing',
-    'Excavation',
-    'Rock breaking',
-    'Soil transport',
-    'Leveling',
-    'Compaction',
-    'After-cut survey',
-    'Final finishing',
-  ];
 
   const tasksForSite = useMemo(() => {
     const tasks = siteTasks.filter((st) => st.siteId === selectedSiteId);

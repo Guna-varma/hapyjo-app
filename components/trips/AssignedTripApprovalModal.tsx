@@ -6,8 +6,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { View, Text, Modal, TouchableOpacity, TextInput, ScrollView, Image, Alert } from 'react-native';
-import type { AssignedTrip } from '@/types';
-import type { Vehicle } from '@/types';
+import type { AssignedTrip, Vehicle } from '@/types';
 import { getTripPhotoPublicUrl } from '@/lib/tripPhotoStorage';
 import { saveImageToDevice } from '@/lib/saveImageToDevice';
 import { useLocale } from '@/context/LocaleContext';

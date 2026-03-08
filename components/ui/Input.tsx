@@ -68,7 +68,7 @@ export function Input({
               () => {}
             );
           }
-        } catch (_) {
+        } catch {
           // Ignore measure/scroll errors (e.g. unmounted or native ref not ready).
         }
       }
