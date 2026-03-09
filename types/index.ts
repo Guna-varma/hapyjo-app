@@ -77,6 +77,10 @@ export interface Site {
   vehicleIds?: string[];
   /** When updating, pass null to clear the rate. */
   contractRateRwf?: number | null;
+  /** Contractor name for this site (per contract). */
+  contractorName?: string | null;
+  /** Contract details / notes for this site. */
+  contractDetails?: string | null;
   /** Running total of approved survey volume (maintained by DB trigger). Use for fast progress. */
   totalExcavatedM3?: number;
 }

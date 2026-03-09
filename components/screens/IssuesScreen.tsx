@@ -37,10 +37,62 @@ import { useResponsiveTheme } from '@/theme/responsive';
 import { generateId } from '@/lib/id';
 import { uploadIssueImage, getIssueImagePublicUrl } from '@/lib/issueImageStorage';
 import { compressIssueImage, getUriSizeInBytes, ISSUE_IMAGE_MAX_INPUT_BYTES } from '@/lib/compressIssueImage';
-import { AlertCircle, Plus } from 'lucide-react-native';
+import { AlertCircle, Plus, Image as ImageIcon } from 'lucide-react-native';
 import { colors, radius, spacing } from '@/theme/tokens';
 
 const ALL_SITES_VALUE = '';
+
+/** Thumbnail that shows a placeholder on load error so preview never breaks the UI. */
+function IssueImageThumb({
+  uri,
+  size,
+  style,
+  onPress,
+}: { uri: string; size: number; style?: object; onPress?: () => void }) {
+  const [error, setError] = useState(false);
+  const displayUri = getIssueImagePublicUrl(uri);
+  const content = error ? (
+    <View style={[styles.issueThumbPlaceholder, { width: size, height: size }]}>
+      <ImageIcon size={size * 0.4} color={colors.gray400} />
+    </View>
+  ) : (
+    <Image
+      source={{ uri: displayUri }}
+      style={[styles.issueThumb, { width: size, height: size }]}
+      resizeMode="cover"
+      onError={() => setError(true)}
+    />
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={[styles.issueThumbWrap, { width: size, height: size }, style]}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={[styles.issueThumbWrap, { width: size, height: size }, style]}>{content}</View>;
+}
+
+/** Full-screen issue image with error fallback. */
+function IssueImageFullView({ uri, style }: { uri: string; style?: object }) {
+  const [error, setError] = useState(false);
+  if (error) {
+    return (
+      <View style={[styles.imageModalImage, styles.imageModalError]} pointerEvents="box-none">
+        <ImageIcon size={48} color={colors.gray400} />
+        <Text style={styles.imageModalErrorText}>Image unavailable</Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode="contain"
+      onError={() => setError(true)}
+    />
+  );
+}
 
 export function IssuesScreen() {
   const { user } = useAuth();
@@ -374,23 +426,14 @@ export function IssuesScreen() {
                               showsHorizontalScrollIndicator={false}
                               contentContainerStyle={styles.issueThumbsScroll}
                             >
-                              {(issue.imageUris ?? []).map((uri, idx) => {
-                                const displayUri = getIssueImagePublicUrl(uri);
-                                return (
-                                  <TouchableOpacity
-                                    key={`${issue.id}-${idx}-${uri.slice(-12)}`}
-                                    onPress={(e) => { e?.stopPropagation?.(); setViewingImageUri(displayUri); }}
-                                    activeOpacity={0.8}
-                                    style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
-                                  >
-                                    <Image
-                                      source={{ uri: displayUri }}
-                                      style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]}
-                                      resizeMode="cover"
-                                    />
-                                  </TouchableOpacity>
-                                );
-                              })}
+                              {(issue.imageUris ?? []).map((uri, idx) => (
+                                <IssueImageThumb
+                                  key={`${issue.id}-${idx}-${uri.slice(-12)}`}
+                                  uri={uri}
+                                  size={thumbnailSize}
+                                  onPress={() => setViewingImageUri(getIssueImagePublicUrl(uri))}
+                                />
+                              ))}
                             </ScrollView>
                             <View style={styles.issueImageActions}>
                               <TouchableOpacity
@@ -444,11 +487,7 @@ export function IssuesScreen() {
                 <Text style={styles.imageModalCloseText}>×</Text>
               </Pressable>
               {viewingImageUri && (
-                <Image
-                  source={{ uri: viewingImageUri }}
-                  style={styles.imageModalImage}
-                  resizeMode="contain"
-                />
+                <IssueImageFullView uri={viewingImageUri} style={styles.imageModalImage} />
               )}
             </View>
           </View>
@@ -496,13 +535,12 @@ export function IssuesScreen() {
                       <Text style={styles.detailImagesLabel}>{t('issues_images_attached')}</Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.issueThumbsScroll}>
                         {(selectedIssue.imageUris ?? []).map((uri, idx) => (
-                          <TouchableOpacity
+                          <IssueImageThumb
                             key={idx}
+                            uri={uri}
+                            size={thumbnailSize}
                             onPress={() => setViewingImageUri(getIssueImagePublicUrl(uri))}
-                            style={[styles.issueThumbWrap, { width: thumbnailSize, height: thumbnailSize }]}
-                          >
-                            <Image source={{ uri: getIssueImagePublicUrl(uri) }} style={[styles.issueThumb, { width: thumbnailSize, height: thumbnailSize }]} resizeMode="cover" />
-                          </TouchableOpacity>
+                          />
                         ))}
                       </ScrollView>
                       <View style={styles.issueImageActions}>
@@ -912,6 +950,12 @@ const styles = StyleSheet.create({
   issueThumb: {
     borderRadius: radius.sm,
   },
+  issueThumbPlaceholder: {
+    backgroundColor: colors.gray100,
+    borderRadius: radius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   issueImageActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -962,5 +1006,15 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1,
     maxHeight: 400,
+  },
+  imageModalError: {
+    backgroundColor: colors.gray100,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalErrorText: {
+    marginTop: spacing.sm,
+    fontSize: 14,
+    color: colors.textMuted,
   },
 });

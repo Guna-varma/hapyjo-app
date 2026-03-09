@@ -1004,6 +1004,9 @@ export const en = {
   profile_email_readonly: 'Email (read-only)',
 
   surveys_submit_survey: 'Submit survey',
+  surveys_download_pdf: 'Download PDF',
+  surveys_pdf_exporting: 'Generating PDF…',
+  surveys_pdf_failed: 'Could not generate PDF',
 
   owner_contract_rate_title: 'Contract rate per cubic meter',
   owner_contract_rate_subtitle: 'Set or update the rate (RWF/m³) for each site. Used for revenue calculation.',
@@ -1014,6 +1017,17 @@ export const en = {
   owner_contract_rate_reset: 'Clear rate for this site',
   owner_contract_rate_save_failed: 'Could not save. Please try again.',
   owner_contract_rate_check_db: 'If the error mentions permission or policy, run the latest Supabase migration so Owner can update sites.',
+  owner_contract_details_title: 'Contract & site details',
+  owner_contract_details_subtitle: 'View contract rate, contractor, and site information.',
+  owner_contractor_name: 'Contractor name',
+  owner_contract_details_label: 'Contract details',
+  owner_contract_details_edit_btn: 'Edit rate & contract',
+  owner_contract_rate_label: 'Contract rate',
+  owner_site_details_section: 'Site details',
+  owner_contract_section: 'Contract',
+  owner_contractor_section: 'Contractor',
+  owner_no_contractor_set: 'Not set',
+  owner_no_contract_details_set: 'Not set',
 
   site_card_progress: 'Progress',
   site_update_progress: 'Update progress',

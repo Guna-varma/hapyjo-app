@@ -13,7 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { colors, radius, spacing, scrollConfig } from '@/theme/tokens';
 
 interface ModalWithKeyboardProps {
   visible: boolean;
@@ -62,6 +62,7 @@ export function ModalWithKeyboard({
                     showsVerticalScrollIndicator={true}
                     contentContainerStyle={styles.scrollContent}
                     style={styles.scrollView}
+                    {...scrollConfig}
                   >
                     {children}
                   </ScrollView>
@@ -106,7 +107,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.xl * 1.5,
+    flexGrow: 1,
   },
   loadingContainer: {
     minHeight: 120,

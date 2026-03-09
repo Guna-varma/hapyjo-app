@@ -10,13 +10,13 @@ import {
   Keyboard,
   StyleSheet,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import {
   Header,
   SegmentedControl,
   ListCard,
+  Card,
   FormModal,
   Input,
   FilterChips,
@@ -24,7 +24,6 @@ import {
   ScreenContainer,
   SkeletonList,
   Badge,
-  UnifiedModal,
 } from '@/components/ui';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { useAuth } from '@/context/AuthContext';
@@ -112,14 +111,10 @@ export function UsersScreen() {
     email: string;
     password: string;
     role?: UserRole;
-  } | null>(null);
-  const [resetConfirmUser, setResetConfirmUser] = useState<{
-    id: string;
-    email: string;
-    role: UserRole;
+    /** When set, show credentials inline in this user's card; otherwise show as top card (create flow). */
+    userId?: string;
   } | null>(null);
   const [resettingUserId, setResettingUserId] = useState<string | null>(null);
-  const [resetError, setResetError] = useState<string | null>(null);
   const [updateModalUser, setUpdateModalUser] = useState<User | null>(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -328,6 +323,7 @@ export function UsersScreen() {
         email: result.email,
         password: result.temporary_password,
         role: newRole,
+        // no userId = show as top card after create
       });
     } catch (e) {
       Alert.alert(
@@ -339,7 +335,7 @@ export function UsersScreen() {
     }
   };
 
-  const openResetConfirm = (u: { id: string; email: string; role: UserRole }) => {
+  const handleResetPassword = async (u: { id: string; email: string; role: UserRole }) => {
     if (u.id === currentUser?.id) {
       Alert.alert(
         t('alert_not_allowed'),
@@ -347,30 +343,20 @@ export function UsersScreen() {
       );
       return;
     }
-    setResetError(null);
-    setResetConfirmUser({ id: u.id, email: u.email, role: u.role });
-  };
-
-  const closeResetConfirm = () => {
-    setResetConfirmUser(null);
-    setResetError(null);
-  };
-
-  const handleResetPasswordConfirm = async () => {
-    if (!resetConfirmUser) return;
-    const u = resetConfirmUser;
     setResettingUserId(u.id);
-    setResetError(null);
     try {
       const result = await resetUserPassword(u.id);
-      closeResetConfirm();
       setCredentialsModal({
         email: result.email ?? u.email,
         password: result.temporary_password ?? '',
         role: u.role,
+        userId: u.id,
       });
     } catch (e) {
-      setResetError(e instanceof Error ? e.message : t('users_reset_failed'));
+      Alert.alert(
+        t('alert_error'),
+        e instanceof Error ? e.message : t('users_reset_failed')
+      );
     } finally {
       setResettingUserId(null);
     }
@@ -469,9 +455,9 @@ export function UsersScreen() {
           <SkeletonList count={5} />
         ) : (
           <>
-            <View style={styles.searchWrap}>
+            <View style={[styles.searchWrap, { marginBottom: theme.spacingMd }]}>
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, { paddingHorizontal: theme.spacingMd, paddingVertical: theme.spacingMd, fontSize: theme.fontSizeBase, minHeight: layout.minTouchHeight }]}
                 placeholder={t('users_search_placeholder')}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -484,9 +470,48 @@ export function UsersScreen() {
               value={userFilter}
               onChange={setUserFilter}
             />
-            <View style={styles.statusRow} />
+            <View style={[styles.statusRow, { marginTop: theme.spacingSm, marginBottom: theme.spacingMd }]} />
 
-            <Text style={styles.sectionTitle}>{t('users_all_users')}</Text>
+            <Text style={[styles.sectionTitle, { fontSize: theme.fontSizeTitle, marginBottom: theme.spacingMd }]}>{t('users_all_users')}</Text>
+
+            {/* New user credentials card (after create) — no modal; scrolls with list */}
+            {credentialsModal && !credentialsModal.userId && (
+              <Card style={[styles.credentialsCard, { marginBottom: theme.spacingMd, padding: theme.spacingMd, borderRadius: radius.md }]}>
+                <Text style={[styles.credentialsCardTitle, { fontSize: theme.fontSizeTitle, marginBottom: theme.spacingSm }]}>{t('users_share_login')}</Text>
+                <Text style={[styles.credentialsHint, { fontSize: theme.fontSizeCaption, marginBottom: theme.spacingMd }]}>{t('users_share_login_hint')}</Text>
+                <Text style={[modalStyles.label, { fontSize: theme.fontSizeCaption }]}>{t('users_email_label')}</Text>
+                <View style={[styles.credBox, { marginBottom: theme.spacingSm }]}>
+                  <Text style={[styles.credValue, { fontSize: theme.fontSizeBase }]} selectable>{credentialsModal.email}</Text>
+                </View>
+                <Text style={[modalStyles.label, { fontSize: theme.fontSizeCaption }]}>{t('users_password_label')}</Text>
+                <View style={[styles.credBox, { marginBottom: theme.spacingSm }]}>
+                  <Text style={[styles.credValue, { fontSize: theme.fontSizeBase }]} selectable>{credentialsModal.password}</Text>
+                </View>
+                {credentialsModal.role != null && (
+                  <>
+                    <Text style={[modalStyles.label, { fontSize: theme.fontSizeCaption, marginTop: theme.spacingXs }]}>{t('users_role')}</Text>
+                    <View style={[styles.credBox, { marginBottom: theme.spacingSm }]}>
+                      <Text style={[styles.credValue, { fontSize: theme.fontSizeBase }]}>{t(getRoleLabelKey(credentialsModal.role))}</Text>
+                    </View>
+                  </>
+                )}
+                <View style={[styles.credActions, { marginTop: theme.spacingSm, gap: theme.spacingSm }]}>
+                  <Pressable onPress={handleCopyCredentials} style={styles.copyBtn}>
+                    <Copy size={dimensions.iconSize} color={colors.gray700} />
+                    <Text style={styles.copyBtnText}>{t('users_copy')}</Text>
+                  </Pressable>
+                  <Pressable onPress={handleShareWhatsApp} style={styles.whatsappBtn}>
+                    <MessageCircle size={dimensions.iconSize} color={colors.surface} />
+                    <Text style={styles.whatsappBtnText}>{t('users_whatsapp')}</Text>
+                  </Pressable>
+                </View>
+                <Text style={[styles.changePasswordHint, { marginTop: theme.spacingSm }]}>{t('users_change_password_after_hint')}</Text>
+                <Pressable onPress={() => setCredentialsModal(null)} style={[styles.doneBtn, { marginTop: theme.spacingSm }]}>
+                  <Text style={styles.doneBtnText}>{t('users_done')}</Text>
+                </Pressable>
+              </Card>
+            )}
+
             {filteredUsers.length > 0 ? (
               filteredUsers.map((u) => (
                 <ListCard
@@ -546,28 +571,62 @@ export function UsersScreen() {
                     currentUser &&
                     canCreateUser(currentUser.role) &&
                     u.id !== currentUser.id ? (
-                      <View style={styles.actionsRow}>
-                        <Pressable
-                          onPress={() => openUpdateModal(u)}
-                          style={styles.updateBtn}
-                        >
-                          <Pencil size={16} color={colors.primary} />
-                          <Text style={styles.updateBtnText}>
-                            {t('users_update_user')}
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => openResetConfirm(u)}
-                          disabled={resettingUserId === u.id}
-                          style={styles.resetBtn}
-                        >
-                          <KeyRound size={16} color={colors.gray700} />
-                          <Text style={styles.resetBtnText}>
-                            {resettingUserId === u.id
-                              ? t('users_resetting')
-                              : t('users_reset_password')}
-                          </Text>
-                        </Pressable>
+                      <View style={styles.cardFooterWrap}>
+                        {/* Credentials inline after reset — email, password, role in card */}
+                        {credentialsModal?.userId === u.id && credentialsModal && (
+                          <View style={[styles.inCardBlock, styles.credentialsBlock]}>
+                            <Text style={[styles.credentialsCardTitle, { fontSize: theme.fontSizeBase, marginBottom: theme.spacingSm }]}>{t('users_share_login')}</Text>
+                            <Text style={[modalStyles.label, { fontSize: theme.fontSizeCaption }]}>{t('users_email_label')}</Text>
+                            <View style={[styles.credBox, { marginBottom: theme.spacingSm }]}>
+                              <Text style={[styles.credValue, { fontSize: theme.fontSizeBase }]} selectable>{credentialsModal.email}</Text>
+                            </View>
+                            <Text style={[modalStyles.label, { fontSize: theme.fontSizeCaption }]}>{t('users_password_label')}</Text>
+                            <View style={[styles.credBox, { marginBottom: theme.spacingSm }]}>
+                              <Text style={[styles.credValue, { fontSize: theme.fontSizeBase }]} selectable>{credentialsModal.password}</Text>
+                            </View>
+                            {credentialsModal.role != null && (
+                              <>
+                                <Text style={[modalStyles.label, { fontSize: theme.fontSizeCaption }]}>{t('users_role')}</Text>
+                                <View style={[styles.credBox, { marginBottom: theme.spacingSm }]}>
+                                  <Text style={[styles.credValue, { fontSize: theme.fontSizeBase }]}>{t(getRoleLabelKey(credentialsModal.role))}</Text>
+                                </View>
+                              </>
+                            )}
+                            <View style={[styles.credActions, { gap: theme.spacingSm }]}>
+                              <Pressable onPress={handleCopyCredentials} style={styles.copyBtn}>
+                                <Copy size={dimensions.iconSize} color={colors.gray700} />
+                                <Text style={styles.copyBtnText}>{t('users_copy')}</Text>
+                              </Pressable>
+                              <Pressable onPress={handleShareWhatsApp} style={styles.whatsappBtn}>
+                                <MessageCircle size={dimensions.iconSize} color={colors.surface} />
+                                <Text style={styles.whatsappBtnText}>{t('users_whatsapp')}</Text>
+                              </Pressable>
+                            </View>
+                            <Text style={[styles.changePasswordHint, { marginTop: theme.spacingXs }]}>{t('users_change_password_after_hint')}</Text>
+                            <Pressable onPress={() => setCredentialsModal(null)} style={[styles.doneBtn, { marginTop: theme.spacingSm }]}>
+                              <Text style={styles.doneBtnText}>{t('users_done')}</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                        {/* Normal actions: only when not showing credentials in this card */}
+                        {credentialsModal?.userId !== u.id && (
+                          <View style={[styles.actionsRow, { gap: theme.spacingSm }]}>
+                            <Pressable onPress={() => openUpdateModal(u)} style={styles.updateBtn}>
+                              <Pencil size={16} color={colors.primary} />
+                              <Text style={styles.updateBtnText}>{t('users_update_user')}</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => handleResetPassword(u)}
+                              disabled={resettingUserId === u.id}
+                              style={styles.resetBtn}
+                            >
+                              <KeyRound size={16} color={colors.gray700} />
+                              <Text style={styles.resetBtnText}>
+                                {resettingUserId === u.id ? t('users_resetting') : t('users_reset_password')}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        )}
                       </View>
                     ) : undefined
                   }
@@ -638,141 +697,6 @@ export function UsersScreen() {
           scroll={false}
         />
       </FormModal>
-
-      {/* Reset password confirmation: in-app modal so it always opens in production */}
-      <UnifiedModal
-        visible={!!resetConfirmUser}
-        onClose={closeResetConfirm}
-        title={t('users_reset_password')}
-        variant="center"
-        showCloseButton={true}
-        keyboardAvoiding={false}
-        footer={null}
-      >
-        {resetConfirmUser && (
-          <View style={styles.confirmBody}>
-            <Text style={styles.confirmMessage}>
-              {t('users_reset_password_confirm')}
-            </Text>
-            <Text style={modalStyles.label}>{t('users_email_label')}</Text>
-            <View style={styles.confirmEmailBox}>
-              <Text style={styles.confirmEmailText} numberOfLines={1}>
-                {resetConfirmUser.email}
-              </Text>
-            </View>
-            <Text style={[modalStyles.label, styles.confirmRoleLabel]}>
-              {t('users_role')}
-            </Text>
-            <View style={styles.confirmEmailBox}>
-              <Text style={styles.confirmEmailText}>
-                {t(getRoleLabelKey(resetConfirmUser.role))}
-              </Text>
-            </View>
-            {resetError != null && (
-              <Text style={styles.resetErrorText}>{resetError}</Text>
-            )}
-            <View style={styles.confirmActions}>
-              <Pressable
-                onPress={closeResetConfirm}
-                style={[modalStyles.btn, modalStyles.btnSecondary]}
-              >
-                <Text style={modalStyles.btnTextSecondary}>
-                  {t('common_cancel')}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={handleResetPasswordConfirm}
-                disabled={resettingUserId === resetConfirmUser.id}
-                style={[modalStyles.btn, styles.confirmResetBtn]}
-              >
-                {resettingUserId === resetConfirmUser.id ? (
-                  <ActivityIndicator size="small" color={colors.surface} />
-                ) : (
-                  <Text style={styles.confirmResetBtnText}>
-                    {t('users_reset')}
-                  </Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        )}
-      </UnifiedModal>
-
-      <UnifiedModal
-        visible={!!credentialsModal}
-        onClose={() => setCredentialsModal(null)}
-        title={t('users_share_login')}
-        variant="center"
-        showCloseButton={true}
-        keyboardAvoiding={false}
-        footer={null}
-      >
-        <View style={styles.credentialsBody}>
-          <Text style={[modalStyles.label, styles.credentialsHint]}>
-            {t('users_share_login_hint')}
-          </Text>
-          {credentialsModal ? (
-            <>
-              <Text style={modalStyles.label}>{t('users_email_label')}</Text>
-              <View style={styles.credBox}>
-                <Text style={styles.credValue} selectable>
-                  {credentialsModal.email}
-                </Text>
-              </View>
-              <Text style={[modalStyles.label, styles.credLabelSpacing]}>
-                {t('users_password_label')}
-              </Text>
-              <View style={styles.credBox}>
-                <Text style={styles.credValue} selectable>
-                  {credentialsModal.password}
-                </Text>
-              </View>
-              {credentialsModal.role != null && (
-                <>
-                  <Text style={[modalStyles.label, styles.credLabelSpacing]}>
-                    {t('users_role')}
-                  </Text>
-                  <View style={styles.credBox}>
-                    <Text style={styles.credValue}>
-                      {t(getRoleLabelKey(credentialsModal.role))}
-                    </Text>
-                  </View>
-                </>
-              )}
-              <View style={styles.credActions}>
-                <Pressable
-                  onPress={handleCopyCredentials}
-                  style={styles.copyBtn}
-                >
-                  <Copy size={dimensions.iconSize} color={colors.gray700} />
-                  <Text style={styles.copyBtnText}>{t('users_copy')}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleShareWhatsApp}
-                  style={styles.whatsappBtn}
-                >
-                  <MessageCircle
-                    size={dimensions.iconSize}
-                    color={colors.surface}
-                  />
-                  <Text style={styles.whatsappBtnText}>
-                    {t('users_whatsapp')}
-                  </Text>
-                </Pressable>
-              </View>
-              <Text style={styles.changePasswordHint}>
-                {t('users_change_password_after_hint')}
-              </Text>
-              <Pressable
-                onPress={() => setCredentialsModal(null)}
-                style={styles.doneBtn}
-              >
-                <Text style={styles.doneBtnText}>{t('users_done')}</Text>
-              </Pressable>
-            </>
-          ) : null}
-        </View>
-      </UnifiedModal>
 
       <FormModal
         visible={!!updateModalUser}
@@ -929,8 +853,30 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   chipMargin: { height: spacing.sm },
-  confirmBody: {
-    paddingTop: spacing.xs,
+  cardFooterWrap: {
+    gap: spacing.sm,
+  },
+  inCardBlock: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.gray50,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginHorizontal: -layout.cardPadding,
+    marginBottom: spacing.sm,
+  },
+  confirmBlock: {},
+  credentialsBlock: {},
+  credentialsCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  credentialsCardTitle: {
+    fontWeight: '700',
+    color: colors.text,
   },
   confirmMessage: {
     fontSize: typography.body.fontSize,
@@ -943,9 +889,6 @@ const styles = StyleSheet.create({
     borderRadius: form.inputRadius,
     padding: form.inputPadding,
     marginBottom: spacing.md,
-  },
-  confirmRoleLabel: {
-    marginTop: spacing.sm,
   },
   confirmEmailText: {
     fontSize: form.inputFontSize,
@@ -977,11 +920,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: typography.body.fontSize,
   },
-  credentialsBody: {
-    paddingTop: spacing.xs,
-  },
   credentialsHint: {
-    marginBottom: spacing.md,
+    color: colors.textSecondary,
   },
   credBox: {
     backgroundColor: colors.gray100,

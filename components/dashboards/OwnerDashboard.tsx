@@ -12,7 +12,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { canAccessTab } from '@/lib/rbac';
 import { TrendingUp, Banknote, PieChart, Plus, FileText, Building2, Users, Globe, BarChart3, Truck, ClipboardCheck } from 'lucide-react-native';
 import { DailyProductionChart } from '@/components/charts/DailyProductionChart';
-import { colors, layout, form, radius } from '@/theme/tokens';
+import { colors, layout, form, radius, scrollConfig } from '@/theme/tokens';
 import { modalStyles } from '@/components/ui/modalStyles';
 import { SiteTasksScreen } from '@/components/screens/SiteTasksScreen';
 import { buildFinancialSummary } from '@/lib/financeSummary';
@@ -25,8 +25,12 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
   const [rateModalVisible, setRateModalVisible] = useState(false);
   const [rateSiteId, setRateSiteId] = useState<string | null>(null);
   const [rateInput, setRateInput] = useState('');
+  const [contractorNameInput, setContractorNameInput] = useState('');
+  const [contractDetailsInput, setContractDetailsInput] = useState('');
   const [rateSaving, setRateSaving] = useState(false);
   const [rateError, setRateError] = useState<string | null>(null);
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+  const [detailsSiteId, setDetailsSiteId] = useState<string | null>(null);
   const [dateFrom] = useState('');
   const [dateTo] = useState('');
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
@@ -95,9 +99,13 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
       const site = sites.find((s) => s.id === siteId);
       setRateSiteId(siteId);
       setRateInput(String(site?.contractRateRwf ?? ''));
+      setContractorNameInput(site?.contractorName?.trim() ?? '');
+      setContractDetailsInput(site?.contractDetails?.trim() ?? '');
     } else {
       setRateSiteId(null);
       setRateInput('');
+      setContractorNameInput('');
+      setContractDetailsInput('');
     }
     setRateModalVisible(true);
   };
@@ -107,8 +115,20 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
       setRateModalVisible(false);
       setRateSiteId(null);
       setRateInput('');
+      setContractorNameInput('');
+      setContractDetailsInput('');
       setRateError(null);
     }
+  };
+
+  const openDetailsModal = (siteId: string) => {
+    setDetailsSiteId(siteId);
+    setDetailsModalVisible(true);
+  };
+
+  const closeDetailsModal = () => {
+    setDetailsModalVisible(false);
+    setDetailsSiteId(null);
   };
 
   const saveContractRate = async () => {
@@ -117,7 +137,11 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
     setRateError(null);
     setRateSaving(true);
     try {
-      await updateSite(rateSiteId, { contractRateRwf: r });
+      await updateSite(rateSiteId, {
+        contractRateRwf: r,
+        contractorName: contractorNameInput.trim() || null,
+        contractDetails: contractDetailsInput.trim() || null,
+      });
       closeRateModal();
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -292,7 +316,7 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
             {sites.map((site) => (
               <TouchableOpacity
                 key={site.id}
-                onPress={() => openRateModal(site.id)}
+                onPress={() => openDetailsModal(site.id)}
                 style={ownerStyles.contractRow}
                 activeOpacity={0.7}
               >
@@ -452,6 +476,7 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
                   contentContainerStyle={ownerStyles.rateModalScrollContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={true}
+                  {...scrollConfig}
                 >
                   <Text style={ownerStyles.rateStepLabel}>{t('owner_contract_rate_select_site')}</Text>
                   <View style={ownerStyles.rateSiteGrid}>
@@ -464,6 +489,8 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
                           onPress={() => {
                             setRateSiteId(site.id);
                             setRateInput(currentRate ? String(currentRate) : '');
+                            setContractorNameInput((site.contractorName ?? '').trim());
+                            setContractDetailsInput((site.contractDetails ?? '').trim());
                             setRateError(null);
                           }}
                           style={[ownerStyles.rateSiteCard, isSelected && ownerStyles.rateSiteCardSelected]}
@@ -493,6 +520,26 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
                         />
                         <Text style={ownerStyles.rateInputSuffix}>RWF / m³</Text>
                       </View>
+                      <Text style={[ownerStyles.rateStepLabel, { marginTop: 20 }]}>{t('owner_contractor_name')}</Text>
+                      <TextInput
+                        value={contractorNameInput}
+                        onChangeText={(v) => { setContractorNameInput(v); setRateError(null); }}
+                        placeholder={t('owner_no_contractor_set')}
+                        placeholderTextColor={colors.placeholder}
+                        editable={!rateSaving}
+                        style={ownerStyles.rateContractorInput}
+                      />
+                      <Text style={[ownerStyles.rateStepLabel, { marginTop: 16 }]}>{t('owner_contract_details_label')}</Text>
+                      <TextInput
+                        value={contractDetailsInput}
+                        onChangeText={(v) => { setContractDetailsInput(v); setRateError(null); }}
+                        placeholder={t('owner_no_contract_details_set')}
+                        placeholderTextColor={colors.placeholder}
+                        editable={!rateSaving}
+                        multiline
+                        numberOfLines={3}
+                        style={ownerStyles.rateContractDetailsInput}
+                      />
                     </>
                   ) : (
                     <Text style={ownerStyles.rateHint}>{t('owner_contract_rate_select_first')}</Text>
@@ -546,6 +593,71 @@ export function OwnerDashboard({ onNavigateTab }: DashboardNavProps) {
             </Pressable>
           </View>
         </TouchableWithoutFeedback>
+      </Modal>
+
+      <Modal visible={detailsModalVisible} transparent animationType="fade" statusBarTranslucent>
+        <Pressable style={ownerStyles.rateModalOverlay} onPress={closeDetailsModal}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={[ownerStyles.rateModalSheet, ownerStyles.detailsModalSheet]}>
+            {detailsSiteId && (() => {
+              const site = sites.find((s) => s.id === detailsSiteId);
+              if (!site) return null;
+              const rate = site.contractRateRwf ?? 0;
+              return (
+                <>
+                  <View style={ownerStyles.rateModalHeader}>
+                    <Text style={ownerStyles.rateModalTitle}>{t('owner_contract_details_title')}</Text>
+                    <Text style={ownerStyles.rateModalSubtitle}>{t('owner_contract_details_subtitle')}</Text>
+                  </View>
+                  <ScrollView style={ownerStyles.rateModalScroll} contentContainerStyle={ownerStyles.detailsModalContent} showsVerticalScrollIndicator {...scrollConfig}>
+                    <Text style={ownerStyles.detailsSectionTitle}>{t('owner_site_details_section')}</Text>
+                    <View style={ownerStyles.detailRow}>
+                      <Text style={ownerStyles.detailLabel}>{t('sites_site_name')}</Text>
+                      <Text style={ownerStyles.detailValue}>{site.name}</Text>
+                    </View>
+                    <View style={ownerStyles.detailRow}>
+                      <Text style={ownerStyles.detailLabel}>{t('sites_location')}</Text>
+                      <Text style={ownerStyles.detailValue}>{site.location}</Text>
+                    </View>
+                    <View style={ownerStyles.detailRow}>
+                      <Text style={ownerStyles.detailLabel}>{t('site_detail_status')}</Text>
+                      <Text style={ownerStyles.detailValue}>{site.status}</Text>
+                    </View>
+                    <Text style={[ownerStyles.detailsSectionTitle, { marginTop: 16 }]}>{t('owner_contract_section')}</Text>
+                    <View style={ownerStyles.detailRow}>
+                      <Text style={ownerStyles.detailLabel}>{t('owner_contract_rate_label')}</Text>
+                      <Text style={ownerStyles.detailValue}>
+                        {rate > 0 ? `${rate.toLocaleString()} RWF/m³` : t('owner_contract_rate_not_set')}
+                      </Text>
+                    </View>
+                    <Text style={[ownerStyles.detailsSectionTitle, { marginTop: 16 }]}>{t('owner_contractor_section')}</Text>
+                    <View style={ownerStyles.detailRow}>
+                      <Text style={ownerStyles.detailLabel}>{t('owner_contractor_name')}</Text>
+                      <Text style={ownerStyles.detailValue}>{(site.contractorName ?? '').trim() || t('owner_no_contractor_set')}</Text>
+                    </View>
+                    <View style={ownerStyles.detailRow}>
+                      <Text style={ownerStyles.detailLabel}>{t('owner_contract_details_label')}</Text>
+                      <Text style={ownerStyles.detailValue}>{(site.contractDetails ?? '').trim() || t('owner_no_contract_details_set')}</Text>
+                    </View>
+                  </ScrollView>
+                  <View style={ownerStyles.rateModalFooter}>
+                    <View style={ownerStyles.rateModalFooterLeft} />
+                    <View style={ownerStyles.rateModalFooterRight}>
+                      <TouchableOpacity onPress={closeDetailsModal} style={[ownerStyles.rateModalBtn, ownerStyles.rateModalBtnCancel]}>
+                        <Text style={ownerStyles.rateModalBtnCancelText}>{t('common_cancel')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => { closeDetailsModal(); openRateModal(detailsSiteId); }}
+                        style={[ownerStyles.rateModalBtn, ownerStyles.rateModalBtnSave]}
+                      >
+                        <Text style={ownerStyles.rateModalBtnSaveText}>{t('owner_contract_details_edit_btn')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <Modal visible={languageModalVisible} transparent animationType="fade">
@@ -845,4 +957,14 @@ const ownerStyles = StyleSheet.create({
   rateModalBtnSave: { backgroundColor: colors.primary },
   rateModalBtnSaveDisabled: { backgroundColor: colors.border, opacity: 0.8 },
   rateModalBtnSaveText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  // Contract details modal
+  detailsModalSheet: { maxHeight: '85%' },
+  detailsModalContent: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
+  detailsSectionTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: 10 },
+  detailRow: { marginBottom: 10 },
+  detailLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
+  detailValue: { fontSize: 15, fontWeight: '600', color: colors.text },
+  // Rate modal contractor/contract details inputs
+  rateContractorInput: { borderWidth: 2, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: colors.text, marginTop: 8 },
+  rateContractDetailsInput: { borderWidth: 2, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: colors.text, marginTop: 8, minHeight: 80, textAlignVertical: 'top' },
 });

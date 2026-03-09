@@ -1006,6 +1006,9 @@ export const rn: Record<EnKeys, string> = {
   profile_email_readonly: 'Imeyili (gusoma gusa)',
 
   surveys_submit_survey: 'Ohereza ikosa',
+  surveys_download_pdf: 'Kuramo PDF',
+  surveys_pdf_exporting: 'Igenera PDF…',
+  surveys_pdf_failed: 'Kugenera PDF byanze',
 
   owner_contract_rate_title: 'Igiciro kuri buri m³',
   owner_contract_rate_subtitle: 'Shyiraho cyangwa vugurura igiciro (RWF/m³) kuri buri rwego. Bikoreshwa mu kubara amafaranga.',
@@ -1016,6 +1019,17 @@ export const rn: Record<EnKeys, string> = {
   owner_contract_rate_reset: 'Siba igiciro kuri uru rwego',
   owner_contract_rate_save_failed: 'Ntibyashoboye kubika. Nyamuneka subiramo.',
   owner_contract_rate_check_db: 'Niba icyiciro kivuga uburenganzira cyangwa policy, koresha migration ya Supabase kugira ngo Owner abashe kuvugurura sites.',
+  owner_contract_details_title: 'Ibisobanuro by\'umukono n\'urwego',
+  owner_contract_details_subtitle: 'Reba igiciro, umukono, n\'amakuru y\'urwego.',
+  owner_contractor_name: 'Izina ry\'umukono',
+  owner_contract_details_label: 'Ibisobanuro by\'umukono',
+  owner_contract_details_edit_btn: 'Hindura igiciro n\'umukono',
+  owner_contract_rate_label: 'Igiciro cy\'umukono',
+  owner_site_details_section: 'Ibisobanuro by\'urwego',
+  owner_contract_section: 'Umukono',
+  owner_contractor_section: 'Umukono',
+  owner_no_contractor_set: 'Ntidashyizwe',
+  owner_no_contract_details_set: 'Ntidashyizwe',
 
   site_card_progress: 'Iterambere',
   site_update_progress: 'Hindura iterambere',

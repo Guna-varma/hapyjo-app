@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,9 @@ import {
   ActivityIndicator,
   StyleSheet,
   Platform,
+  Alert,
 } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import { Card } from '@/components/ui/Card';
 import { Header } from '@/components/ui/Header';
 import { Badge } from '@/components/ui/Badge';
@@ -24,12 +26,13 @@ import { useResponsiveTheme } from '@/theme/responsive';
 import { parseSurveyFileContent, computeWorkVolume, computeCubature, parseAndMergeSurveyFiles } from '@/lib/surveyParser';
 import { generateId } from '@/lib/id';
 import { pickSurveyTextFile } from '@/lib/readSurveyFile';
+import { printSurveyToPdf, type SurveyPdfData } from '@/lib/surveyPdf';
 import { Plus, MapPin, Calendar, CheckCircle, FileUp, Trash2, FileText, BarChart3, Box, ClipboardList } from 'lucide-react-native';
 import { ModalWithKeyboard } from '@/components/ui/ModalWithKeyboard';
 import { Button } from '@/components/ui/Button';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { modalStyles } from '@/components/ui/modalStyles';
-import { colors, radius } from '@/theme/tokens';
+import { colors, radius, scrollConfig } from '@/theme/tokens';
 
 type TopFileEntry = { id: string; name: string; content: string };
 type DepthFile = { name: string; content: string } | null;
@@ -48,19 +51,22 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
   const { user } = useAuth();
   const { t } = useLocale();
   const theme = useResponsiveTheme();
-  const { sites, surveys, siteAssignments, addSurvey, updateSurvey, refetch, loading } = useMockAppStore();
+  const { sites, surveys, siteAssignments, users, addSurvey, updateSurvey, refetch, loading } = useMockAppStore();
   const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const isSurveyor = user?.role === 'surveyor';
   const isAssistantSupervisor = user?.role === 'assistant_supervisor';
-  const mySiteIds = (user?.id ? siteAssignments.filter((a) => a.userId === user.id).map((a) => a.siteId) : []) as string[];
+  const mySiteIds = useMemo(
+    () => (user?.id ? siteAssignments.filter((a) => a.userId === user.id).map((a) => a.siteId) : []) as string[],
+    [user?.id, siteAssignments],
+  );
 
   const mySurveys = surveys.filter((s) => s.surveyorId === user?.id);
   const pendingSurveys = isAssistantSupervisor
     ? surveys.filter((s) => s.status === 'approval_pending' && mySiteIds.includes(s.siteId))
     : [];
   const approvedSurveys = surveys.filter((s) => s.status === 'approved');
-  const getSiteName = (sid: string) => sites.find((s) => s.id === sid)?.name ?? sid;
+  const getSiteName = useCallback((sid: string) => sites.find((s) => s.id === sid)?.name ?? sid, [sites]);
 
   const today = new Date().toISOString().slice(0, 10);
   const [newModalVisible, setNewModalVisible] = useState(false);
@@ -77,6 +83,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
   const [showDepthPaste, setShowDepthPaste] = useState(false);
   const [revisingSurveyId, setRevisingSurveyId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<string | null>(initialSurveyDateFilter ?? null);
+  const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialSurveyDateFilter) setDateFilter(initialSurveyDateFilter);
@@ -101,8 +108,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
       }
     }
     return Array.from(bySite.values()).map((x) => ({ ...x, siteName: getSiteName(x.siteId) }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- getSiteName is stable (sites from store)
-  }, [isSurveyor, filteredMySurveys, filteredApprovedSurveys, sites]);
+  }, [isSurveyor, filteredMySurveys, filteredApprovedSurveys, getSiteName]);
 
   useEffect(() => {
     if (initialOpenNewSurveyModal && isSurveyor && sites.length > 0) {
@@ -262,6 +268,73 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
     showToast(t('surveys_toast_rejected'));
   };
 
+  const canDownloadSurveyPdf = useCallback((s: { surveyorId: string; siteId: string; status: string }) => {
+    if (!user?.id) return false;
+    if (isSurveyor) return s.surveyorId === user.id;
+    if (isAssistantSupervisor) return mySiteIds.includes(s.siteId) && (s.status === 'approval_pending' || s.status === 'approved');
+    if (user.role === 'owner' || user.role === 'head_supervisor') return s.status === 'approved';
+    return false;
+  }, [user?.id, user?.role, isSurveyor, isAssistantSupervisor, mySiteIds]);
+
+  const handleDownloadSurveyPdf = useCallback(async (
+    survey: { id: string; siteId: string; surveyDate: string; volumeM3: number; status: string; surveyorId: string; createdAt: string; approvedById?: string | null; approvedAt?: string | null },
+    calculation?: { beforePoints: number; afterPoints: number; surfaceUtile?: number; triangleCount?: number; totalFill?: number }
+  ) => {
+    setExportingPdfId(survey.id);
+    try {
+      const siteName = getSiteName(survey.siteId);
+      const surveyorName = users.find((u) => u.id === survey.surveyorId)?.name ?? survey.surveyorId.slice(0, 8);
+      const approvedByName = survey.approvedById ? (users.find((u) => u.id === survey.approvedById)?.name ?? survey.approvedById) : null;
+      const data: SurveyPdfData = {
+        survey: { ...survey },
+        siteName,
+        surveyorName,
+        approvedByName,
+        calculation,
+      };
+      const uri = await printSurveyToPdf(data);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: t('surveys_download_pdf') });
+      }
+    } catch (e) {
+      Alert.alert(t('surveys_pdf_failed'), e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportingPdfId(null);
+    }
+  }, [users, getSiteName, t]);
+
+  const handleDownloadModalPdf = useCallback(async () => {
+    if (parsedVolume == null || !user?.id) return;
+    setExportingPdfId('modal');
+    try {
+      const siteName = getSiteName(siteId);
+      const surveyorName = users.find((u) => u.id === user.id)?.name ?? user.id.slice(0, 8);
+      const data: SurveyPdfData = {
+        survey: {
+          id: 'preview',
+          siteId,
+          surveyDate,
+          volumeM3: parsedVolume,
+          status: 'approval_pending',
+          surveyorId: user.id,
+          createdAt: new Date().toISOString(),
+        },
+        siteName,
+        surveyorName,
+        approvedByName: null,
+        calculation: parsedCubature ? { beforePoints: beforeCount, afterPoints: afterCount, surfaceUtile: parsedCubature.surfaceUtile, triangleCount: parsedCubature.triangleCount, totalFill: parsedCubature.totalFill } : { beforePoints: beforeCount, afterPoints: afterCount },
+      };
+      const uri = await printSurveyToPdf(data);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: t('surveys_download_pdf') });
+      }
+    } catch (e) {
+      Alert.alert(t('surveys_pdf_failed'), e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportingPdfId(null);
+    }
+  }, [parsedVolume, parsedCubature, beforeCount, afterCount, siteId, surveyDate, user, users, getSiteName, t]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -318,6 +391,7 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
             style={[surveySummaryStyles.sitesScroll, { maxHeight: theme.scale(220) }]}
             showsVerticalScrollIndicator={siteSummaries.length > 2}
             nestedScrollEnabled
+            {...scrollConfig}
           >
             {siteSummaries.map((sum) => (
               <View key={sum.siteId} style={[surveySummaryStyles.siteRow, { paddingVertical: theme.spacingSm }]}>
@@ -349,6 +423,9 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: theme.screenPadding, paddingBottom: theme.spacingXl, flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
+        showsVerticalScrollIndicator={true}
+        nestedScrollEnabled
+        {...scrollConfig}
       >
         {loading ? (
           <SkeletonList count={5} />
@@ -398,6 +475,19 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                     <Text className="text-blue-600 font-semibold">{t('surveys_revise')}</Text>
                   </TouchableOpacity>
                 )}
+                {canDownloadSurveyPdf(s) && (
+                  <TouchableOpacity
+                    onPress={() => handleDownloadSurveyPdf(s)}
+                    disabled={exportingPdfId === s.id}
+                    className="mt-2 py-2 flex-row items-center justify-center rounded-lg border border-gray-300 bg-gray-50"
+                  >
+                    {exportingPdfId === s.id ? (
+                      <ActivityIndicator size="small" color={colors.gray600} />
+                    ) : (
+                      <Text className="text-gray-700 font-semibold">{t('surveys_download_pdf')}</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
               </Card>
             ))}
           </>
@@ -435,6 +525,15 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                         <Text className="text-white font-semibold ml-2">{t('surveys_approve_button')}</Text>
                       </TouchableOpacity>
                     </View>
+                    {canDownloadSurveyPdf(s) && (
+                      <TouchableOpacity
+                        onPress={() => handleDownloadSurveyPdf(s)}
+                        disabled={exportingPdfId === s.id}
+                        className="mt-2 py-2 flex-row items-center justify-center rounded-lg border border-gray-300 bg-gray-50"
+                      >
+                        {exportingPdfId === s.id ? <ActivityIndicator size="small" color={colors.gray600} /> : <Text className="text-gray-700 font-semibold">{t('surveys_download_pdf')}</Text>}
+                      </TouchableOpacity>
+                    )}
                   </Card>
                 ))}
                 <Text className="text-lg font-bold text-gray-900 mb-2 mt-4">{t('surveys_approved_list')}</Text>
@@ -458,6 +557,15 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                   <Text className="text-sm text-gray-600 ml-1">{s.surveyDate}</Text>
                 </View>
                 <Text className="text-sm text-gray-700">{t('surveys_total_cubic_m')}: {s.volumeM3.toFixed(2)} m³</Text>
+                {canDownloadSurveyPdf(s) && (
+                  <TouchableOpacity
+                    onPress={() => handleDownloadSurveyPdf(s)}
+                    disabled={exportingPdfId === s.id}
+                    className="mt-2 py-2 flex-row items-center justify-center rounded-lg border border-gray-300 bg-gray-50"
+                  >
+                    {exportingPdfId === s.id ? <ActivityIndicator size="small" color={colors.gray600} /> : <Text className="text-gray-700 font-semibold">{t('surveys_download_pdf')}</Text>}
+                  </TouchableOpacity>
+                )}
               </Card>
             ))}
           </>
@@ -478,6 +586,19 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
                 <PressableScale onPress={() => { setParsedVolume(null); setParsedCubature(null); }} disabled={submittingSurvey} style={[modalStyles.btn, modalStyles.btnSecondary]}>
                   <Text style={modalStyles.btnTextSecondary}>{t('surveys_revise')}</Text>
                 </PressableScale>
+                {isSurveyor && (
+                  <PressableScale
+                    onPress={handleDownloadModalPdf}
+                    disabled={submittingSurvey || exportingPdfId === 'modal'}
+                    style={[modalStyles.btn, modalStyles.btnSecondary]}
+                  >
+                    {exportingPdfId === 'modal' ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Text style={modalStyles.btnTextSecondary}>{t('surveys_download_pdf')}</Text>
+                    )}
+                  </PressableScale>
+                )}
                 <Button
                   variant="primary"
                   onPress={isRevise ? submitReviseSurvey : submitNewSurvey}
@@ -575,23 +696,23 @@ export function SurveysScreen({ initialOpenNewSurveyModal, onClearOpenNewSurveyM
           </TouchableOpacity>
         )}
         {(parsedVolume !== null || parsedCubature !== null) && (
-          <View style={{ marginBottom: 16, padding: 12, backgroundColor: colors.blue50, borderRadius: radius.md }}>
-            <Text style={[modalStyles.label, { marginBottom: 4 }]}>{t('surveys_result_preview')}</Text>
-            <Text style={{ fontSize: 14, color: colors.gray700 }}>{t('tab_sites')}: {getSiteName(siteId)}</Text>
-            <Text style={{ fontSize: 14, color: colors.gray700 }}>{t('surveys_survey_date')}: {surveyDate}</Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text, marginTop: 8 }}>{t('surveys_calculated_volume')}: {parsedVolume != null ? parsedVolume.toFixed(2) : (parsedCubature?.totalCut ?? 0).toFixed(2)} m³</Text>
+          <View style={{ marginBottom: theme.spacingMd, padding: theme.spacingMd, backgroundColor: colors.blue50, borderRadius: radius.md }}>
+            <Text style={[modalStyles.label, { marginBottom: theme.spacingXs, fontSize: theme.fontSizeCaption }]}>{t('surveys_result_preview')}</Text>
+            <Text style={{ fontSize: theme.fontSizeBase, color: colors.gray700 }}>{t('tab_sites')}: {getSiteName(siteId)}</Text>
+            <Text style={{ fontSize: theme.fontSizeBase, color: colors.gray700 }}>{t('surveys_survey_date')}: {surveyDate}</Text>
+            <Text style={{ fontSize: theme.fontSizeTitle, fontWeight: '700', color: colors.text, marginTop: theme.spacingSm }}>{t('surveys_calculated_volume')}: {parsedVolume != null ? parsedVolume.toFixed(2) : (parsedCubature?.totalCut ?? 0).toFixed(2)} m³</Text>
             {parsedCubature != null && (
               <>
-                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 6 }}>{t('surveys_surface_utile')}: {parsedCubature.surfaceUtile.toFixed(2)} m²</Text>
-                <Text style={{ fontSize: 12, color: colors.textSecondary }}>{t('surveys_triangles')}: {parsedCubature.triangleCount}</Text>
+                <Text style={{ fontSize: theme.fontSizeCaption, color: colors.textSecondary, marginTop: theme.spacingSm }}>{t('surveys_surface_utile')}: {parsedCubature.surfaceUtile.toFixed(2)} m²</Text>
+                <Text style={{ fontSize: theme.fontSizeCaption, color: colors.textSecondary }}>{t('surveys_triangles')}: {parsedCubature.triangleCount}</Text>
                 {parsedCubature.totalFill > 0 && (
-                  <Text style={{ fontSize: 12, color: colors.textSecondary }}>{t('surveys_fill_volume')}: {parsedCubature.totalFill.toFixed(2)} m³</Text>
+                  <Text style={{ fontSize: theme.fontSizeCaption, color: colors.textSecondary }}>{t('surveys_fill_volume')}: {parsedCubature.totalFill.toFixed(2)} m³</Text>
                 )}
-                <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>{t('surveys_boundary_auto')}</Text>
-                <Text style={{ fontSize: 11, color: colors.textSecondary }}>{t('surveys_breaklines_enabled')}</Text>
+                <Text style={{ fontSize: theme.fontSizeCaption - 1, color: colors.textSecondary, marginTop: theme.spacingXs }}>{t('surveys_boundary_auto')}</Text>
+                <Text style={{ fontSize: theme.fontSizeCaption - 1, color: colors.textSecondary }}>{t('surveys_breaklines_enabled')}</Text>
               </>
             )}
-            <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>{t('surveys_before_points')}: {beforeCount} · {t('surveys_after_points')}: {afterCount}</Text>
+            <Text style={{ fontSize: theme.fontSizeCaption, color: colors.textSecondary, marginTop: theme.spacingXs }}>{t('surveys_before_points')}: {beforeCount} · {t('surveys_after_points')}: {afterCount}</Text>
           </View>
         )}
       </ModalWithKeyboard>

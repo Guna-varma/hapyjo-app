@@ -7,7 +7,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useNotificationNavigation } from '@/context/NotificationNavigationContext';
 import { useResponsiveTheme } from '@/theme/responsive';
-import { colors, dimensions } from '@/theme/tokens';
+import { colors, dimensions, scrollConfig } from '@/theme/tokens';
 import { getTabsForRole, type TabId } from '@/lib/rbac';
 import type { SurveyNavParams } from '@/components/RoleBasedDashboard';
 import { RoleBasedDashboard } from '@/components/RoleBasedDashboard';
@@ -281,6 +281,7 @@ export function AppNavigation() {
               gap: 4,
               paddingBottom: 0,
             }}
+            {...scrollConfig}
           >
             {visibleTabs.map((tab) => {
               const Icon = tab.icon;

@@ -9,7 +9,7 @@ import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useToast } from '@/context/ToastContext';
 import { formatAmount } from '@/lib/currency';
-import { colors, spacing, radius } from '@/theme/tokens';
+import { colors, spacing, radius, scrollConfig } from '@/theme/tokens';
 import { getRoleLabelKey } from '@/lib/rbac';
 import type { Task, AssignedTrip, UserRole, Trip } from '@/types';
 import type { DashboardNavProps } from '@/components/RoleBasedDashboard';
@@ -796,6 +796,7 @@ export function AssistantSupervisorDashboard({ onNavigateTab }: DashboardNavProp
                 showsVerticalScrollIndicator
                 nestedScrollEnabled
                 keyboardShouldPersistTaps="handled"
+                {...scrollConfig}
               >
                 <View style={styles.tripDetailHero}>
                   <View style={styles.tripDetailHeroTextWrap}>

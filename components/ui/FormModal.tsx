@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { FormScrollProvider, getKeyboardSafePaddingBottom } from '@/context/FormScrollContext';
 import { modalStyles } from '@/components/ui/modalStyles';
-import { colors, spacing } from '@/theme/tokens';
+import { colors, spacing, scrollConfig } from '@/theme/tokens';
 
 interface FormModalProps {
   visible: boolean;
@@ -83,6 +83,7 @@ export function FormModal({
                   ref={scrollRef}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={true}
+                  {...scrollConfig}
                   contentContainerStyle={[
                     styles.scrollContent,
                     { paddingBottom: keyboardSafePaddingBottom + insets.bottom },

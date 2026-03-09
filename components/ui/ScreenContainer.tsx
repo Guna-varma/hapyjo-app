@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, ScrollView, ScrollViewProps, StyleProp, ViewStyle } from 'react-native';
-import { layout } from '@/theme/tokens';
+import { layout, scrollConfig } from '@/theme/tokens';
 
 interface ScreenContainerProps extends Omit<ScrollViewProps, 'contentContainerStyle'> {
   children: React.ReactNode;
@@ -38,7 +38,8 @@ export function ScreenContainer({
         className="flex-1"
         contentContainerStyle={contentStyle}
         keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        {...scrollConfig}
         {...scrollProps}
       >
         <View className={contentClassName}>{children}</View>

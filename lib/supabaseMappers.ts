@@ -70,6 +70,8 @@ export function siteFromRow(row: Record<string, unknown>): Site {
     driverIds: toStringArray(row.driver_ids),
     vehicleIds: toStringArray(row.vehicle_ids),
     contractRateRwf: row.contract_rate_rwf != null ? Number(row.contract_rate_rwf) : undefined,
+    contractorName: row.contractor_name != null ? String(row.contractor_name) : undefined,
+    contractDetails: row.contract_details != null ? String(row.contract_details) : undefined,
     totalExcavatedM3: row.total_excavated_m3 != null ? Number(row.total_excavated_m3) : undefined,
   };
 }
@@ -432,6 +434,8 @@ export function siteToRow(s: Partial<Site>): Record<string, unknown> {
   if (s.driverIds != null) row.driver_ids = s.driverIds;
   if (s.vehicleIds != null) row.vehicle_ids = s.vehicleIds;
   if (s.contractRateRwf !== undefined) row.contract_rate_rwf = s.contractRateRwf ?? null;
+  if (s.contractorName !== undefined) row.contractor_name = s.contractorName ?? null;
+  if (s.contractDetails !== undefined) row.contract_details = s.contractDetails ?? null;
   return row;
 }
 

@@ -7,7 +7,7 @@
     "icon": "./assets/images/hapyjo_playstore_icon_v2_1024.png",
     "scheme": "hapyjo",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -74,9 +74,8 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "c6e446f8-f580-4fd4-8b15-4247e40cf563"
+        "projectId": "7e8c7f84-33b9-4891-9d3c-a15b253f962d"
       }
-    },
-    "owner": "gunavarma009"
+    }
   }
 }

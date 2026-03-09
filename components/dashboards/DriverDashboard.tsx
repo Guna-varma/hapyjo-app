@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
-import { colors, layout } from '@/theme/tokens';
+import { colors, layout, scrollConfig } from '@/theme/tokens';
 import { Truck, CheckCircle2, Clock, AlertCircle, Phone, User, MapPin } from 'lucide-react-native';
 import { ASSIGNED_TRIP_STATUS_LABELS, ASSIGNED_TRIP_STATUS_COLORS } from '@/lib/tripLifecycle';
 import type { Task } from '@/types';
@@ -210,7 +210,8 @@ export function DriverDashboard(_props: DashboardNavProps = {}) {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="always"
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        {...scrollConfig}
       >
         <View style={styles.statsRow}>
           {stats.map((stat, index) => (

@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FormScrollProvider, getKeyboardSafePaddingBottom } from '@/context/FormScrollContext';
-import { colors, spacing } from '@/theme/tokens';
+import { colors, spacing, scrollConfig } from '@/theme/tokens';
 
 interface FormScreenLayoutProps {
   /** Fixed header (e.g. title + language switcher). */
@@ -61,6 +61,7 @@ export function FormScreenLayout({
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={true}
+          {...scrollConfig}
         >
           {children}
         </ScrollView>

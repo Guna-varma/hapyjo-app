@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { colors, dimensions, radius, spacing } from '@/theme/tokens';
+import { colors, dimensions, radius, spacing, scrollConfig } from '@/theme/tokens';
 
 export interface FilterChipOption<T = string> {
   value: T;
@@ -52,6 +52,7 @@ export function FilterChips<T = string>({
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        {...scrollConfig}
       >
         {chips}
       </ScrollView>

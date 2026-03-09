@@ -11,7 +11,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
 import { useMockAppStore } from '@/context/MockAppStoreContext';
 import { useResponsiveTheme } from '@/theme/responsive';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { colors, radius, spacing, scrollConfig } from '@/theme/tokens';
 import type { SiteTask, SiteTaskStatus } from '@/types';
 
 const TEMPLATE_ORDER = [
@@ -225,6 +225,8 @@ export function SiteTasksScreen({ initialSiteId, readOnly, onBack }: SiteTasksSc
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: theme.screenPadding, paddingBottom: theme.spacingXl }}
+        showsVerticalScrollIndicator={true}
+        {...scrollConfig}
       >
         {/* Task table */}
         {tasksForSite.map((task) => {

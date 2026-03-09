@@ -355,7 +355,7 @@ function useSupabaseStore(): MockAppStoreContextValue {
           )
           .order("survey_date", { ascending: false })
           .limit(200),
-        supabase.from("issues").select("*"),
+        supabase.from("issues").select("id, site_id, raised_by_id, created_by_role, description, image_uris, status, created_at, resolved_by, resolved_at"),
         supabase
           .from("work_photos")
           .select("*")

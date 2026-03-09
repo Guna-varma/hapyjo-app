@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, ScrollView, ScrollViewProps, StyleSheet } from 'react-native';
-import { colors, layout } from '@/theme/tokens';
+import { colors, layout, scrollConfig } from '@/theme/tokens';
 
 interface DashboardLayoutProps extends Omit<ScrollViewProps, 'contentContainerStyle'> {
   children: React.ReactNode;
@@ -25,7 +25,8 @@ export function DashboardLayout({ children, scroll = true, ...scrollProps }: Das
         style={styles.fill}
         contentContainerStyle={contentStyle}
         keyboardShouldPersistTaps="always"
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        {...scrollConfig}
         {...scrollProps}
       >
         {children}

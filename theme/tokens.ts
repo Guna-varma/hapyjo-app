@@ -80,6 +80,21 @@ export const form = {
   inputFontSize: 16,
 } as const;
 
+/**
+ * Smooth scroll defaults for ScrollView across the app.
+ * Use spread: <ScrollView {...scrollConfig} />
+ */
+export const scrollConfig = {
+  scrollEventThrottle: 16,
+  decelerationRate: 'normal' as const,
+  ...(Platform.OS === 'ios'
+    ? { bounces: true, directionalLockEnabled: true }
+    : {}),
+  ...(Platform.OS === 'android'
+    ? { overScrollMode: 'always' as const, nestedScrollEnabled: true }
+    : {}),
+};
+
 /** Uniform card shadow (boxShadow on web to avoid deprecated shadow* props). */
 export const cardShadow = Platform.select({
   web: { boxShadow: '0 2px 4px rgba(0,0,0,0.08)' as const },

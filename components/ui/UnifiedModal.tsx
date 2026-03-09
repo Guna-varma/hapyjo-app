@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { modalStyles } from '@/components/ui/modalStyles';
-import { colors, spacing } from '@/theme/tokens';
+import { colors, spacing, scrollConfig } from '@/theme/tokens';
 import { X } from 'lucide-react-native';
 
 export type UnifiedModalVariant = 'sheet' | 'center';
@@ -46,11 +46,12 @@ export function UnifiedModal({
   footer,
   children,
 }: UnifiedModalProps) {
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const maxHeight = height * 0.85;
   const isCenter = variant === 'center';
   const centerSheetHeight = Math.min(420, height * 0.7);
+  const centerMaxWidth = Math.min(400, width * 0.92);
 
   const content = (
     <View style={styles.contentWrap}>
@@ -78,6 +79,7 @@ export function UnifiedModal({
         showsVerticalScrollIndicator={true}
         contentContainerStyle={styles.scrollContent}
         style={styles.scrollView}
+        {...scrollConfig}
       >
         {children}
       </ScrollView>
@@ -116,7 +118,7 @@ export function UnifiedModal({
           style={[
             variant === 'sheet' ? modalStyles.sheet : modalStyles.sheetCenter,
             variant === 'sheet' && { height: maxHeight },
-            isCenter && { height: centerSheetHeight },
+            isCenter && { height: centerSheetHeight, maxWidth: centerMaxWidth, width: '100%' },
           ]}
           onPress={(e) => e.stopPropagation()}
         >
